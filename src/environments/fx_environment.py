@@ -3,6 +3,8 @@ Gym environment for FX trading
 """
 
 import pandas as pd
+import numpy as np
+import gymnasium as gym
 
 from src.environments.base_environment import BaseTradingEnv
 from src.environments.data_processing import (
@@ -46,7 +48,21 @@ class FxTradingEnv(BaseTradingEnv):
         2. Create reverse tickers
         """
         super().preprocess_data()
+
+        self.existing_currency_pairs = self.historical_prices.columns.copy().to_list()
         self.historical_prices = create_reverse_fx_tickers(self.historical_prices)
+
+        self.action_space = gym.spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(len(self.existing_currency_pairs),),
+            dtype=np.float32,
+        )
+
+        # State space = balances, exchange rates, technical indicators, etc
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=self._get_state_dim(), dtype=np.float32
+        )
 
     def _validate_inputs(self) -> None:
         """
@@ -72,7 +88,7 @@ class FxTradingEnv(BaseTradingEnv):
         """
         portfolio_in_base_ccy = {}
 
-        current_market = self.historical_prices.loc[self.datetime, :]
+        current_market = self.historical_prices.loc[self.current_datetime, :]
 
         for ccy_name, amount in self.current_portfolio.items():
 
@@ -86,17 +102,36 @@ class FxTradingEnv(BaseTradingEnv):
         return portfolio_in_base_ccy
 
     @property
-    def current_portfolio_value(self):
+    def current_portfolio_value(self) -> float:
         """
         Get current portfolio value in base currency
         """
         return sum(self._convert_portfolio_to_base_ccy().values())
 
     @property
-    def current_portfolio_weights(self):
+    def current_portfolio_weights(self) -> dict:
         """
         Get current portfolio weights
         """
         portfolio = self._convert_portfolio_to_base_ccy()
         total_value = sum(portfolio.values())
         return {ccy: value / total_value for ccy, value in portfolio.items()}
+
+    def _get_state(self) -> np.ndarray:
+        """
+        Current balance, current rates, returns
+
+        Todo: add technical indicators
+        """
+        balances = np.fromiter(self.current_portfolio.values(), dtype=np.float32)
+        current_rates = self.historical_prices.loc[self.current_datetime, :].to_numpy()
+        returns = (
+            self.historical_prices.loc[: str(self.current_datetime), :]
+            .tail(2)
+            .apply(np.log)
+            .diff()
+            .iloc[-1, :]
+            .to_numpy()
+        )
+
+        return np.concat([balances, current_rates, returns])

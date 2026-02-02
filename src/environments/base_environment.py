@@ -2,8 +2,11 @@
 Basic trading environment
 """
 
+from copy import deepcopy
+
 import gymnasium as gym
 import pandas as pd
+import numpy as np
 
 from gymnasium.core import ActType, ObsType
 
@@ -23,12 +26,14 @@ class BaseTradingEnv(gym.Env):
         """
         Gymnasium for trading
         """
-        self.current_portfolio = initial_portfolio
+        self.initial_portfolio = deepcopy(initial_portfolio)
+        self.current_portfolio = deepcopy(initial_portfolio)
         self.historical_prices = historical_prices
         self.base_currency = base_currency
         self.fees = {"long": long_position_fee, "short": short_position_fee}
         self.long_only = long_only
-        self.datetime = start_datetime or historical_prices.index.min()
+        self.current_datetime = start_datetime or historical_prices.index.min()
+        self.initial_datetime = deepcopy(self.current_datetime)
 
     def preprocess_data(self) -> None:
         """
@@ -41,8 +46,8 @@ class BaseTradingEnv(gym.Env):
         Check validity of price history and current portfolio
         """
 
-        if self.datetime not in self.historical_prices.index:
-            raise KeyError(f"{self.datetime} is missing in data")
+        if self.current_datetime not in self.historical_prices.index:
+            raise KeyError(f"{self.current_datetime} is missing in data")
 
     def _convert_portfolio_to_base_ccy(self) -> dict:
         """
@@ -66,11 +71,25 @@ class BaseTradingEnv(gym.Env):
         Gym step
         """
 
-    def reset(self, seed=None, options=None) -> tuple[ObsType, dict]:
+    def _get_state(self) -> np.ndarray:
         """
-        GymEnv reset
+        Current balance, current rates, returns, etc
+        """
+
+    def _get_state_dim(self) -> tuple[float]:
+        return self._get_state().shape
+
+    def _get_next_date(self) -> pd.Timestamp:
+        return self.historical_prices.loc[str(self.current_datetime) :, :].index[1]
+
+    def reset(self, seed=None, options=None):
+        """
+        Resets environment
         """
         super().reset(seed=seed)
+        self.current_datetime = deepcopy(self.initial_datetime)
+        self.current_portfolio = deepcopy(self.initial_portfolio)
+        return self._get_state(), {"datetime", self.current_datetime}
 
     def render(self, render_mode: str = None):
         """
