@@ -17,9 +17,8 @@ class BaseTradingEnv(gym.Env):
         self,
         historical_prices: pd.DataFrame,
         initial_portfolio: dict[str, float],
-        long_position_fee: float = 0.1,
-        long_only: bool = True,
-        short_position_fee: float = 0.1,  # todo: add shorting later
+        trade_fee: float = 0.1,
+        long_only: bool = True,  # todo: add shorting later
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
     ):
@@ -30,7 +29,9 @@ class BaseTradingEnv(gym.Env):
         self.current_portfolio = deepcopy(initial_portfolio)
         self.historical_prices = historical_prices
         self.base_currency = base_currency
-        self.fees = {"long": long_position_fee, "short": short_position_fee}
+        self.fees = {
+            "general": trade_fee,
+        }
         self.long_only = long_only
         self.current_datetime = start_datetime or historical_prices.index.min()
         self.initial_datetime = deepcopy(self.current_datetime)

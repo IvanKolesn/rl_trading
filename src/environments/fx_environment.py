@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import gymnasium as gym
 
-from gymnasium.core import ActType
+from gymnasium.core import ActType, ObsType
 
 from src.environments.base_environment import BaseTradingEnv
 from src.environments.data_processing import (
@@ -23,25 +23,19 @@ class FxTradingEnv(BaseTradingEnv):
         self,
         historical_prices: pd.DataFrame,
         initial_portfolio: dict[str, float],
-        long_position_fee: float = 0.1,
-        long_only: bool = True,
-        short_position_fee: float = 0.1,  # todo: add shorting later
+        trade_fee: float = 0.001,  # 10 bp
+        long_only: bool = True,  # todo: add shorting later
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
     ):
         """
         Gymnasium environment for FX trading
-
-        Assumtions:
-            1. We cannot make multiple-currency trades at the same time
-            For example if we have USD and we want to buy SGDJPY, then we have to buy USDSGD or USDJPY first
         """
         super().__init__(
             historical_prices=historical_prices,
             initial_portfolio=initial_portfolio,
-            long_position_fee=long_position_fee,
+            trade_fee=trade_fee,
             long_only=long_only,
-            short_position_fee=short_position_fee,  # todo: add shorting later
             base_currency=base_currency,
             start_datetime=start_datetime,
         )
@@ -119,39 +113,52 @@ class FxTradingEnv(BaseTradingEnv):
         total_value = sum(portfolio.values())
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
+    # todo: add early stops for truncation
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
         Action:
 
         1. Do trades as flows: from -100% to 100% for one currency pair
         2. Compute new portfolio
+        3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
         """
-        new_portfolio = deepcopy(fx_env.current_portfolio)
+        new_portfolio = deepcopy(self.current_portfolio)
 
-        for single_action, currency_pair in zip(action, fx_env.existing_currency_pairs):
+        penalty = False
+
+        for single_action, currency_pair in zip(action, self.existing_currency_pairs):
 
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
-                mult_to = fx_env.current_market[currency_pair]
+                mult_to = self.current_market[currency_pair]
             else:
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
-                mult_to = 1 / fx_env.current_market[currency_pair]
+                mult_to = 1 / self.current_market[currency_pair]
 
-            trade_amount = np.floor(current_porfolio[fx_from] * abs(single_action))
+            trade_amount = np.floor(
+                self.current_portfolio[fx_from] * abs(single_action)
+            )
+            if trade_amount > new_portfolio[fx_from]:
+                penalty = True
+                trade_amount = new_portfolio[fx_from]
+
             new_portfolio[fx_from] -= trade_amount
-            new_portfolio[fx_to] += trade_amount * mult_to
-
             assert new_portfolio[fx_from] >= 0
-            assert new_portfolio[fx_to] >= 0
 
-        old_portfolio_value = fx_env.current_portfolio_value
-        fx_env.datetime = fx_env._get_next_date()
-        fx_env.current_portfolio = new_portfolio
+            new_portfolio[fx_to] += trade_amount * mult_to * (1 - self.fees["general"])
 
-        reward = np.log(fx_env.current_portfolio_value) - np.log(old_portfolio_value)
+        old_portfolio_value = self.current_portfolio_value
+        self.current_datetime = self._get_next_date()
+        self.current_portfolio = new_portfolio
 
-        # todo: write conditions for termination
-        terminated = False
+        if penalty:
+            reward = -1.0
+        else:
+            reward = np.log(self.current_portfolio_value) - np.log(old_portfolio_value)
+
+        terminated = (
+            self.current_datetime == self.historical_prices.index.max() or penalty
+        )
         truncated = False
 
         info = {
