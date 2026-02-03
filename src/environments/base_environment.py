@@ -55,6 +55,10 @@ class BaseTradingEnv(gym.Env):
         """
 
     @property
+    def current_market(self):
+        return self.historical_prices.loc[self.current_datetime, :]
+
+    @property
     def current_portfolio_value(self):
         """
         Get current portfolio value in base currency
@@ -89,7 +93,10 @@ class BaseTradingEnv(gym.Env):
         super().reset(seed=seed)
         self.current_datetime = deepcopy(self.initial_datetime)
         self.current_portfolio = deepcopy(self.initial_portfolio)
-        return self._get_state(), {"datetime", self.current_datetime}
+        return self._get_state(), {
+            "datetime": self.current_datetime,
+            "portfolio": self.current_portfolio,
+        }
 
     def render(self, render_mode: str = None):
         """

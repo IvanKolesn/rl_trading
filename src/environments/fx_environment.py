@@ -2,9 +2,13 @@
 Gym environment for FX trading
 """
 
+from copy import deepcopy
+
 import pandas as pd
 import numpy as np
 import gymnasium as gym
+
+from gymnasium.core import ActType
 
 from src.environments.base_environment import BaseTradingEnv
 from src.environments.data_processing import (
@@ -88,14 +92,12 @@ class FxTradingEnv(BaseTradingEnv):
         """
         portfolio_in_base_ccy = {}
 
-        current_market = self.historical_prices.loc[self.current_datetime, :]
-
         for ccy_name, amount in self.current_portfolio.items():
 
             if ccy_name == self.base_currency:
                 mult = 1.0
             else:
-                mult = float(current_market[self.base_currency + ccy_name])
+                mult = float(self.current_market[self.base_currency + ccy_name])
 
             portfolio_in_base_ccy[ccy_name] = amount / mult
 
@@ -117,6 +119,48 @@ class FxTradingEnv(BaseTradingEnv):
         total_value = sum(portfolio.values())
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
+    def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
+        """
+        Action:
+
+        1. Do trades as flows: from -100% to 100% for one currency pair
+        2. Compute new portfolio
+        """
+        new_portfolio = deepcopy(fx_env.current_portfolio)
+
+        for single_action, currency_pair in zip(action, fx_env.existing_currency_pairs):
+
+            if single_action < 0:
+                fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
+                mult_to = fx_env.current_market[currency_pair]
+            else:
+                fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
+                mult_to = 1 / fx_env.current_market[currency_pair]
+
+            trade_amount = np.floor(current_porfolio[fx_from] * abs(single_action))
+            new_portfolio[fx_from] -= trade_amount
+            new_portfolio[fx_to] += trade_amount * mult_to
+
+            assert new_portfolio[fx_from] >= 0
+            assert new_portfolio[fx_to] >= 0
+
+        old_portfolio_value = fx_env.current_portfolio_value
+        fx_env.datetime = fx_env._get_next_date()
+        fx_env.current_portfolio = new_portfolio
+
+        reward = np.log(fx_env.current_portfolio_value) - np.log(old_portfolio_value)
+
+        # todo: write conditions for termination
+        terminated = False
+        truncated = False
+
+        info = {
+            "datetime": self.current_datetime,
+            "portfolio": self.current_portfolio,
+        }
+
+        return self._get_state(), reward, terminated, truncated, info
+
     def _get_state(self) -> np.ndarray:
         """
         Current balance, current rates, returns
@@ -124,7 +168,7 @@ class FxTradingEnv(BaseTradingEnv):
         Todo: add technical indicators
         """
         balances = np.fromiter(self.current_portfolio.values(), dtype=np.float32)
-        current_rates = self.historical_prices.loc[self.current_datetime, :].to_numpy()
+        current_rates = self.current_market.to_numpy()
         returns = (
             self.historical_prices.loc[: str(self.current_datetime), :]
             .tail(2)
