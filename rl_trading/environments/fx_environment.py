@@ -10,8 +10,8 @@ import gymnasium as gym
 
 from gymnasium.core import ActType, ObsType
 
-from src.environments.base_environment import BaseTradingEnv
-from src.environments.data_processing import (
+from rl_trading.environments.base_environment import BaseTradingEnv
+from rl_trading.environments.data_processing import (
     get_unique_currencies,
     create_reverse_fx_tickers,
 )
