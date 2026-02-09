@@ -2,6 +2,7 @@
 Basic trading environment
 """
 
+from typing import Union
 from copy import deepcopy
 from random import choice
 
@@ -11,19 +12,24 @@ import numpy as np
 
 from gymnasium.core import ActType, ObsType
 
+DEFAULT_TRADING_PARAMS = {
+    "trade_fee": 0.001,  # 10 bp
+    "long_only": True,  # todo: add shorting later
+    "base_currency": "usd",
+    "max_delta_in_weights": 0.25,
+}
+
 
 class BaseTradingEnv(gym.Env):
 
     def __init__(
         self,
         historical_prices: pd.DataFrame,
+        features_dataset: pd.DataFrame,
         initial_portfolio: dict[str, float],
-        trade_fee: float = 0.1,
-        long_only: bool = True,  # todo: add shorting later
-        base_currency: str = "usd",
+        trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
-        max_delta_in_weights: float = 0.25,
-        trade_days: int = 1,
+        episode_length_days: int = 1,
     ):
         """
         Gymnasium for trading
@@ -31,20 +37,16 @@ class BaseTradingEnv(gym.Env):
         self.initial_portfolio = deepcopy(initial_portfolio)
         self.current_portfolio = deepcopy(initial_portfolio)
         self.historical_prices = historical_prices
-        self.base_currency = base_currency
-        self.fees = {
-            "general": trade_fee,
-        }
-        self.long_only = long_only
-        self.trade_days = trade_days
+        self.features_dataset = features_dataset
+        self.trading_params = trading_params
+        self.episode_length_days = int(episode_length_days)
+
         if start_datetime is not None:
             self.current_datetime = start_datetime
         else:
-            self.current_datetime = choice(
-                self.historical_prices.index.to_list()[: -self.trade_days]
-            )
+            self.current_datetime = self._get_random_start_date()
+
         self.initial_datetime = deepcopy(self.current_datetime)
-        self.max_delta_in_weights = max_delta_in_weights
         self.initial_portfolio_value = None
 
     def preprocess_data(self) -> None:
@@ -68,12 +70,21 @@ class BaseTradingEnv(gym.Env):
 
     @property
     def current_market(self):
+        """
+        Get current market snapshot
+        """
         return self.historical_prices.loc[self.current_datetime, :]
 
     @property
     def current_portfolio_value(self):
         """
         Get current portfolio value in base currency
+        """
+
+    @property
+    def _eligible_start_times(self):
+        """
+        reset time
         """
 
     @property
@@ -98,16 +109,18 @@ class BaseTradingEnv(gym.Env):
     def _get_next_date(self) -> pd.Timestamp:
         return self.historical_prices.loc[str(self.current_datetime) :, :].index[1]
 
+    def _get_random_start_date(self):
+        if self.episode_length_days >= len(self._eligible_start_times):
+            return self._eligible_start_times[0]
+        return choice(self._eligible_start_times[: -self.episode_length_days])
+
     def reset(self, seed=None, options=None):
         """
         Resets environment
         """
         super().reset(seed=seed)
 
-        self.current_datetime = choice(
-            self.historical_prices.index.to_list()[: -self.trade_days]
-        )
-
+        self.current_datetime = self._get_random_start_date()
         self.initial_datetime = deepcopy(self.current_datetime)
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
