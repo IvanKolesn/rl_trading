@@ -141,7 +141,7 @@ class FxTradingEnv(BaseTradingEnv):
         """
         new_portfolio = deepcopy(self.current_portfolio)
 
-        penalty = False
+        # penalty = False
         old_portfolio_value = self.current_portfolio_value
 
         # Bankrupt
@@ -167,7 +167,7 @@ class FxTradingEnv(BaseTradingEnv):
             )
 
             if trade_amount > new_portfolio[fx_from]:
-                penalty = True
+                # penalty = True
                 trade_amount = new_portfolio[fx_from]
 
             new_portfolio[fx_from] -= trade_amount
@@ -180,9 +180,10 @@ class FxTradingEnv(BaseTradingEnv):
 
         new_portfolio_value = self.current_portfolio_value
 
-        reward = np.log(new_portfolio_value / old_portfolio_value) - 0.5 * float(
-            penalty
-        )
+        # if penalty:
+        #     reward = -1
+        # else:
+        reward = np.log(new_portfolio_value / old_portfolio_value)
 
         terminated = self.current_datetime == self.historical_prices.index.max()
         truncated = (
