@@ -3,6 +3,7 @@ Gym environment for FX trading
 """
 
 from copy import deepcopy
+from typing import Union
 
 import pandas as pd
 import numpy as np
@@ -10,7 +11,10 @@ import gymnasium as gym
 
 from gymnasium.core import ActType, ObsType
 
-from rl_trading.environments.base_environment import BaseTradingEnv
+from rl_trading.environments.base_environment import (
+    BaseTradingEnv,
+    DEFAULT_TRADING_PARAMS,
+)
 from rl_trading.environments.data_processing import (
     get_unique_currencies,
     create_reverse_fx_tickers,
@@ -22,26 +26,22 @@ class FxTradingEnv(BaseTradingEnv):
     def __init__(
         self,
         historical_prices: pd.DataFrame,
+        features_dataset: pd.DataFrame,
         initial_portfolio: dict[str, float],
-        trade_fee: float = 0.001,  # 10 bp
-        long_only: bool = True,  # todo: add shorting later
-        base_currency: str = "usd",
+        trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
-        max_delta_in_weights: float = 0.25,  # Max 25% at once
-        trade_days: int = 1,
+        episode_length_days: int = 1,
     ):
         """
         Gymnasium environment for FX trading
         """
         super().__init__(
             historical_prices=historical_prices,
+            features_dataset=features_dataset,
             initial_portfolio=initial_portfolio,
-            trade_fee=trade_fee,
-            long_only=long_only,
-            base_currency=base_currency,
+            trading_params=trading_params,
             start_datetime=start_datetime,
-            max_delta_in_weights=max_delta_in_weights,
-            trade_days=trade_days,
+            episode_length_days=episode_length_days,
         )
 
     def preprocess_data(self) -> None:
@@ -56,8 +56,8 @@ class FxTradingEnv(BaseTradingEnv):
         self.initial_portfolio_value = deepcopy(self.current_portfolio_value)
 
         self.action_space = gym.spaces.Box(
-            low=-self.max_delta_in_weights,
-            high=self.max_delta_in_weights,
+            low=-self.trading_params["max_delta_in_weights"],
+            high=self.trading_params["max_delta_in_weights"],
             shape=(len(self.existing_currency_pairs),),
             dtype=np.float32,
         )
@@ -91,23 +91,23 @@ class FxTradingEnv(BaseTradingEnv):
         portfolio_in_base_ccy = {}
 
         for ccy_name, amount in self.current_portfolio.items():
-            if ccy_name == self.base_currency:
+            if ccy_name == self.trading_params["base_currency"]:
                 portfolio_in_base_ccy[ccy_name] = amount
             else:
                 # Try direct rate first (e.g., eurusd for EUR to USD conversion)
-                direct_pair = ccy_name + self.base_currency
+                direct_pair = ccy_name + self.trading_params["base_currency"]
                 if direct_pair in self.current_market:
                     rate = float(self.current_market[direct_pair])
                     portfolio_in_base_ccy[ccy_name] = amount * rate
                 else:
                     # Try reverse rate (e.g., usdeur for EUR to USD conversion)
-                    reverse_pair = self.base_currency + ccy_name
+                    reverse_pair = self.trading_params["base_currency"] + ccy_name
                     if reverse_pair in self.current_market:
                         rate = 1.0 / float(self.current_market[reverse_pair])
                         portfolio_in_base_ccy[ccy_name] = amount * rate
                     else:
                         raise KeyError(
-                            f"No exchange rate found for {ccy_name} to {self.base_currency}"
+                            f"No exchange rate found for {ccy_name} to {self.trading_params["base_currency"]}"
                         )
 
         return portfolio_in_base_ccy
@@ -173,7 +173,9 @@ class FxTradingEnv(BaseTradingEnv):
             new_portfolio[fx_from] -= trade_amount
             assert new_portfolio[fx_from] >= 0
 
-            new_portfolio[fx_to] += trade_amount * mult_to * (1 - self.fees["general"])
+            new_portfolio[fx_to] += (
+                trade_amount * mult_to * (1 - self.trading_params["trade_fee"])
+            )
 
         self.current_datetime = self._get_next_date()
         self.current_portfolio = new_portfolio
@@ -188,7 +190,7 @@ class FxTradingEnv(BaseTradingEnv):
         terminated = self.current_datetime == self.historical_prices.index.max()
         truncated = (
             self.current_datetime - self.initial_datetime
-        ).days >= self.trade_days
+        ).days >= self.episode_length_days
 
         info = {
             "datetime": self.current_datetime,
@@ -201,25 +203,32 @@ class FxTradingEnv(BaseTradingEnv):
         """
         State representation
         """
-        # Current balances
-        balances = np.fromiter(self.current_portfolio.values(), dtype=np.float32)
 
-        # Current exchange rates
-        current_rates = self.current_market.to_numpy()
-
-        # Recent returns and volatility
-        recent_data = self.historical_prices.loc[: str(self.current_datetime), :].tail(
-            20
+        current_weights = np.fromiter(
+            self.current_portfolio_weights.values(), dtype=np.float32
         )
-        returns = np.log(recent_data).diff().iloc[-15:].mean().to_numpy()
-        volatility = np.log(recent_data).diff().iloc[-15:].std().to_numpy()
+        current_prices = self.current_market.to_numpy()
 
-        # Portfolio metrics
-        portfolio_return = (
-            self.current_portfolio_value - self.initial_portfolio_value
-        ) / self.initial_portfolio_value
+        temp_dataset = self.features_dataset.loc[
+            self.features_dataset["timestamp"] <= self.current_datetime, :
+        ]
 
-        # Concatenate all features
+        all_indicators = []
+
+        for _, data in temp_dataset.groupby("ccy"):
+            data = data.ffill()
+            indicators = (
+                data.drop(columns=["ccy", "open", "high", "low", "close", "timestamp"])
+                .iloc[-1, :]
+                .to_list()
+            )
+            all_indicators += indicators
+            all_indicators += [
+                np.log(data["close"].values[-1] / data["close"].values[-2]),
+                np.log(data["close"].values[-1] / data["close"].values[-5]),
+                np.log(data["close"].values[-1] / data["close"].values[-10]),
+            ]
+
         return np.concatenate(
-            [balances, current_rates, returns, volatility, [portfolio_return]]
-        )
+            [current_weights, current_prices, np.array(all_indicators)]
+        ).flatten()

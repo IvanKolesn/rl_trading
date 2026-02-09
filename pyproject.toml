@@ -17,6 +17,7 @@ dependencies = [
     "torch>=2.7.0",
     "ray==2.52.1",
     "gymnasium>=1.2.2",
+    "pandas-ta==0.4.71b0",
 ]
 
 [project.optional-dependencies]
