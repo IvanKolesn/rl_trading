@@ -28,6 +28,7 @@ class FxTradingEnv(BaseTradingEnv):
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
         max_delta_in_weights: float = 0.25,  # Max 25% at once
+        trade_days: int = 1,
     ):
         """
         Gymnasium environment for FX trading
@@ -40,6 +41,7 @@ class FxTradingEnv(BaseTradingEnv):
             base_currency=base_currency,
             start_datetime=start_datetime,
             max_delta_in_weights=max_delta_in_weights,
+            trade_days=trade_days,
         )
 
     def preprocess_data(self) -> None:
@@ -178,12 +180,14 @@ class FxTradingEnv(BaseTradingEnv):
 
         new_portfolio_value = self.current_portfolio_value
 
-        reward = (
-            new_portfolio_value - old_portfolio_value
-        ) / old_portfolio_value - 0.5 * float(penalty)
+        reward = np.log(new_portfolio_value / old_portfolio_value) - 0.5 * float(
+            penalty
+        )
 
         terminated = self.current_datetime == self.historical_prices.index.max()
-        truncated = False
+        truncated = (
+            self.current_datetime - self.initial_datetime
+        ).days >= self.trade_days
 
         info = {
             "datetime": self.current_datetime,

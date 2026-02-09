@@ -22,6 +22,7 @@ class BaseTradingEnv(gym.Env):
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
         max_delta_in_weights: float = 0.25,
+        trade_days: int = 1,
     ):
         """
         Gymnasium for trading
@@ -38,6 +39,7 @@ class BaseTradingEnv(gym.Env):
         self.initial_datetime = deepcopy(self.current_datetime)
         self.max_delta_in_weights = max_delta_in_weights
         self.initial_portfolio_value = None
+        self.trade_days = trade_days
 
     def preprocess_data(self) -> None:
         """
