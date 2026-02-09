@@ -38,13 +38,12 @@ class BaseTradingEnv(gym.Env):
         self.long_only = long_only
         self.trade_days = trade_days
         if start_datetime is not None:
-            self.current_datetime = start_datetime or historical_prices.index.min()
-            self.initial_datetime = deepcopy(self.current_datetime)
+            self.current_datetime = start_datetime
         else:
             self.current_datetime = choice(
-                historical_prices.index.to_list()[: -self.trade_days]
+                self.historical_prices.index.to_list()[: -self.trade_days]
             )
-            self.initial_datetime = None
+        self.initial_datetime = deepcopy(self.current_datetime)
         self.max_delta_in_weights = max_delta_in_weights
         self.initial_portfolio_value = None
 
@@ -105,12 +104,11 @@ class BaseTradingEnv(gym.Env):
         """
         super().reset(seed=seed)
 
-        if self.initial_datetime is not None:
-            self.current_datetime = deepcopy(self.initial_datetime)
-        else:
-            self.current_datetime = choice(
-                historical_prices.index.to_list()[: -self.trade_days]
-            )
+        self.current_datetime = choice(
+            self.historical_prices.index.to_list()[: -self.trade_days]
+        )
+
+        self.initial_datetime = deepcopy(self.current_datetime)
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
 
