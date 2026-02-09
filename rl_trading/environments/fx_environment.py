@@ -22,6 +22,9 @@ from rl_trading.environments.data_processing import (
 
 
 class FxTradingEnv(BaseTradingEnv):
+    """
+    Gymnasium environment for FX trading
+    """
 
     def __init__(
         self,
@@ -41,7 +44,7 @@ class FxTradingEnv(BaseTradingEnv):
             initial_portfolio=initial_portfolio,
             trading_params=trading_params,
             start_datetime=start_datetime,
-            episode_length_days=episode_length_days,
+            episode_length_days=int(episode_length_days),
         )
 
     def preprocess_data(self) -> None:
@@ -76,8 +79,9 @@ class FxTradingEnv(BaseTradingEnv):
         self.all_currencies = get_unique_currencies(self.historical_prices)
 
         for x in self.all_currencies:
-            if x not in self.current_portfolio:
-                self.current_portfolio[x] = 0.0
+            self.current_portfolio[x] = self.current_portfolio.get(x, 0)
+
+        self.initial_portfolio = deepcopy(self.current_portfolio)
 
         for x in self.current_portfolio:
             if x not in self.all_currencies:
@@ -88,7 +92,7 @@ class FxTradingEnv(BaseTradingEnv):
         return self.historical_prices.index[
             (self.historical_prices.index.hour == 9)
             & (self.historical_prices.index.minute < 1)
-        ].to_list()
+        ].to_list()[1:]
 
     def _convert_portfolio_to_base_ccy(self) -> dict:
         """
@@ -100,13 +104,11 @@ class FxTradingEnv(BaseTradingEnv):
             if ccy_name == self.trading_params["base_currency"]:
                 portfolio_in_base_ccy[ccy_name] = amount
             else:
-                # Try direct rate first (e.g., eurusd for EUR to USD conversion)
                 direct_pair = ccy_name + self.trading_params["base_currency"]
                 if direct_pair in self.current_market:
                     rate = float(self.current_market[direct_pair])
                     portfolio_in_base_ccy[ccy_name] = amount * rate
                 else:
-                    # Try reverse rate (e.g., usdeur for EUR to USD conversion)
                     reverse_pair = self.trading_params["base_currency"] + ccy_name
                     if reverse_pair in self.current_market:
                         rate = 1.0 / float(self.current_market[reverse_pair])
@@ -136,7 +138,6 @@ class FxTradingEnv(BaseTradingEnv):
             return {ccy: 0.0 for ccy in portfolio}
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
-    # todo: add early stops for truncation
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
         Action:
@@ -156,10 +157,6 @@ class FxTradingEnv(BaseTradingEnv):
 
         for single_action, currency_pair in zip(action, self.existing_currency_pairs):
 
-            # Skip near-zero actions
-            if abs(single_action) < 1e-5:
-                continue
-
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
                 mult_to = self.current_market[currency_pair]
@@ -171,14 +168,9 @@ class FxTradingEnv(BaseTradingEnv):
             trade_amount = np.floor(
                 self.current_portfolio[fx_from] * abs(single_action) * 0.995
             )
-
-            if trade_amount > new_portfolio[fx_from]:
-                # penalty = True
-                trade_amount = new_portfolio[fx_from]
+            trade_amount = min(new_portfolio[fx_from], trade_amount)
 
             new_portfolio[fx_from] -= trade_amount
-            assert new_portfolio[fx_from] >= 0
-
             new_portfolio[fx_to] += (
                 trade_amount * mult_to * (1 - self.trading_params["trade_fee"])
             )
@@ -213,28 +205,14 @@ class FxTradingEnv(BaseTradingEnv):
         current_weights = np.fromiter(
             self.current_portfolio_weights.values(), dtype=np.float32
         )
-        current_prices = self.current_market.to_numpy()
 
-        temp_dataset = self.features_dataset.loc[
-            self.features_dataset["timestamp"] <= self.current_datetime, :
-        ]
-
-        all_indicators = []
-
-        for _, data in temp_dataset.groupby("ccy"):
-            data = data.ffill()
-            indicators = (
-                data.drop(columns=["ccy", "open", "high", "low", "close", "timestamp"])
-                .iloc[-1, :]
-                .to_list()
-            )
-            all_indicators += indicators
-            all_indicators += [
-                np.log(data["close"].values[-1] / data["close"].values[-2]),
-                np.log(data["close"].values[-1] / data["close"].values[-5]),
-                np.log(data["close"].values[-1] / data["close"].values[-10]),
+        all_indicators = (
+            self.features_dataset.loc[
+                self.features_dataset["timestamp"] == self.current_datetime, :
             ]
+            .drop(columns=["ccy", "open", "high", "low", "timestamp"])
+            .to_numpy()
+            .flatten()
+        )
 
-        return np.concatenate(
-            [current_weights, current_prices, np.array(all_indicators)]
-        ).flatten()
+        return np.concatenate([current_weights, np.array(all_indicators)])

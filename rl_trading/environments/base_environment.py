@@ -39,14 +39,12 @@ class BaseTradingEnv(gym.Env):
         self.historical_prices = historical_prices
         self.features_dataset = features_dataset
         self.trading_params = trading_params
-        self.episode_length_days = episode_length_days
+        self.episode_length_days = int(episode_length_days)
 
         if start_datetime is not None:
             self.current_datetime = start_datetime
         else:
-            self.current_datetime = choice(
-                self._eligible_start_times[: -self.episode_length_days]
-            )
+            self.current_datetime = self._get_random_start_date()
 
         self.initial_datetime = deepcopy(self.current_datetime)
         self.initial_portfolio_value = None
@@ -72,6 +70,9 @@ class BaseTradingEnv(gym.Env):
 
     @property
     def current_market(self):
+        """
+        Get current market snapshot
+        """
         return self.historical_prices.loc[self.current_datetime, :]
 
     @property
@@ -108,16 +109,18 @@ class BaseTradingEnv(gym.Env):
     def _get_next_date(self) -> pd.Timestamp:
         return self.historical_prices.loc[str(self.current_datetime) :, :].index[1]
 
+    def _get_random_start_date(self):
+        if self.episode_length_days >= len(self._eligible_start_times):
+            return self._eligible_start_times[0]
+        return choice(self._eligible_start_times[: -self.episode_length_days])
+
     def reset(self, seed=None, options=None):
         """
         Resets environment
         """
         super().reset(seed=seed)
 
-        self.current_datetime = choice(
-            self._eligible_start_times[: -self.episode_length_days]
-        )
-
+        self.current_datetime = self._get_random_start_date()
         self.initial_datetime = deepcopy(self.current_datetime)
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
