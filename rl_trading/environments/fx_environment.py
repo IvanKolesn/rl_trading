@@ -66,14 +66,13 @@ class FxTradingEnv(BaseTradingEnv):
         """
         Check validity of price history and current portfolio
         """
-
         super()._validate_inputs()
 
         self.all_currencies = get_unique_currencies(self.historical_prices)
 
         for x in self.all_currencies:
             if x not in self.current_portfolio:
-                print(f"{x} not in inital portfolio. Setting quantity to 0")
+                print(f"{x} not in initial portfolio. Setting quantity to 0")
                 self.current_portfolio[x] = 0.0
 
         for x in self.current_portfolio:
@@ -87,13 +86,24 @@ class FxTradingEnv(BaseTradingEnv):
         portfolio_in_base_ccy = {}
 
         for ccy_name, amount in self.current_portfolio.items():
-
             if ccy_name == self.base_currency:
-                mult = 1.0
+                portfolio_in_base_ccy[ccy_name] = amount
             else:
-                mult = float(self.current_market[self.base_currency + ccy_name])
-
-            portfolio_in_base_ccy[ccy_name] = amount / mult
+                # Try direct rate first (e.g., eurusd for EUR to USD conversion)
+                direct_pair = ccy_name + self.base_currency
+                if direct_pair in self.current_market:
+                    rate = float(self.current_market[direct_pair])
+                    portfolio_in_base_ccy[ccy_name] = amount * rate
+                else:
+                    # Try reverse rate (e.g., usdeur for EUR to USD conversion)
+                    reverse_pair = self.base_currency + ccy_name
+                    if reverse_pair in self.current_market:
+                        rate = 1.0 / float(self.current_market[reverse_pair])
+                        portfolio_in_base_ccy[ccy_name] = amount * rate
+                    else:
+                        raise KeyError(
+                            f"No exchange rate found for {ccy_name} to {self.base_currency}"
+                        )
 
         return portfolio_in_base_ccy
 
@@ -111,6 +121,8 @@ class FxTradingEnv(BaseTradingEnv):
         """
         portfolio = self._convert_portfolio_to_base_ccy()
         total_value = sum(portfolio.values())
+        if total_value == 0:
+            return {ccy: 0.0 for ccy in portfolio}
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
     # todo: add early stops for truncation
@@ -125,8 +137,11 @@ class FxTradingEnv(BaseTradingEnv):
         new_portfolio = deepcopy(self.current_portfolio)
 
         penalty = False
+        old_portfolio_value = self.current_portfolio_value
 
         for single_action, currency_pair in zip(action, self.existing_currency_pairs):
+            if abs(single_action) < 1e-10:  # Skip near-zero actions
+                continue
 
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
@@ -147,14 +162,20 @@ class FxTradingEnv(BaseTradingEnv):
 
             new_portfolio[fx_to] += trade_amount * mult_to * (1 - self.fees["general"])
 
-        old_portfolio_value = self.current_portfolio_value
         self.current_datetime = self._get_next_date()
         self.current_portfolio = new_portfolio
 
         if penalty:
             reward = -1.0
         else:
-            reward = np.log(self.current_portfolio_value) - np.log(old_portfolio_value)
+            # Use simple return for stability
+            new_portfolio_value = self.current_portfolio_value
+            if old_portfolio_value > 0:
+                reward = (
+                    new_portfolio_value - old_portfolio_value
+                ) / old_portfolio_value
+            else:
+                reward = 0.0
 
         terminated = (
             self.current_datetime == self.historical_prices.index.max() or penalty
