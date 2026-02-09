@@ -207,12 +207,7 @@ class FxTradingEnv(BaseTradingEnv):
         )
 
         all_indicators = (
-            self.features_dataset.loc[
-                self.features_dataset["timestamp"] == self.current_datetime, :
-            ]
-            .drop(columns=["ccy", "open", "high", "low", "timestamp"])
-            .to_numpy()
-            .flatten()
+            self.features_dataset.loc[self.current_datetime, :].to_numpy().flatten()
         )
 
         return np.concatenate([current_weights, np.array(all_indicators)])
