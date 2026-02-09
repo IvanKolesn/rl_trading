@@ -77,12 +77,18 @@ class FxTradingEnv(BaseTradingEnv):
 
         for x in self.all_currencies:
             if x not in self.current_portfolio:
-                print(f"{x} not in initial portfolio. Setting quantity to 0")
                 self.current_portfolio[x] = 0.0
 
         for x in self.current_portfolio:
             if x not in self.all_currencies:
                 raise KeyError(f"ccy {x} has no history")
+
+    @property
+    def _eligible_start_times(self):
+        return self.historical_prices.index[
+            (self.historical_prices.index.hour == 9)
+            & (self.historical_prices.index.minute < 1)
+        ].to_list()
 
     def _convert_portfolio_to_base_ccy(self) -> dict:
         """

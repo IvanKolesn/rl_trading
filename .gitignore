@@ -218,4 +218,5 @@ __marimo__/
 # Extra files
 *.csv
 notebooks/*/
-data/
+data/*
+*.gzip

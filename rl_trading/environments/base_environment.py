@@ -45,7 +45,7 @@ class BaseTradingEnv(gym.Env):
             self.current_datetime = start_datetime
         else:
             self.current_datetime = choice(
-                self.historical_prices.index.to_list()[: -self.episode_length_days]
+                self._eligible_start_times[: -self.episode_length_days]
             )
 
         self.initial_datetime = deepcopy(self.current_datetime)
@@ -81,6 +81,12 @@ class BaseTradingEnv(gym.Env):
         """
 
     @property
+    def _eligible_start_times(self):
+        """
+        reset time
+        """
+
+    @property
     def current_portfolio_weights(self):
         """
         Get current portfolio weights
@@ -109,7 +115,7 @@ class BaseTradingEnv(gym.Env):
         super().reset(seed=seed)
 
         self.current_datetime = choice(
-            self.historical_prices.index.to_list()[: -self.episode_length_days]
+            self._eligible_start_times[: -self.episode_length_days]
         )
 
         self.initial_datetime = deepcopy(self.current_datetime)
