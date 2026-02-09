@@ -2,8 +2,6 @@
 Torch model for RayLib actions
 """
 
-import numpy as np
-import ray
 import torch
 import torch.nn as nn
 
@@ -26,21 +24,27 @@ class FXModel(TorchModelV2, nn.Module):
         self.main_net = nn.Sequential(
             nn.Linear(obs_dim, 256),
             nn.GELU(),
+            nn.Dropout(0.2),
             nn.Linear(256, 128),
             nn.GELU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 64),
             nn.ReLU(),
         )
 
-        self.action_net = nn.Sequential(nn.Linear(64, num_outputs), nn.Tanh())
+        self.action_net = nn.Sequential(
+            nn.Linear(64, num_outputs),
+            nn.Tanh(),  # Actions in [-1, 1]
+        )
 
-        self.value_net = nn.Linear(64, 1)
+        self.value_net = nn.Sequential(nn.Linear(64, 1))
         self._value = None
 
     def forward(self, input_dict, state, seq_lens):
         x = self.main_net(input_dict["obs"])
         self._value = self.value_net(x)
-        return self.action_net(x), state
+        actions = self.action_net(x)
+        return actions, state
 
     def value_function(self):
         return self._value.squeeze(1)

@@ -3,6 +3,7 @@ Basic trading environment
 """
 
 from copy import deepcopy
+from random import choice
 
 import gymnasium as gym
 import pandas as pd
@@ -21,6 +22,8 @@ class BaseTradingEnv(gym.Env):
         long_only: bool = True,  # todo: add shorting later
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
+        max_delta_in_weights: float = 0.25,
+        trade_days: int = 1,
     ):
         """
         Gymnasium for trading
@@ -33,8 +36,16 @@ class BaseTradingEnv(gym.Env):
             "general": trade_fee,
         }
         self.long_only = long_only
-        self.current_datetime = start_datetime or historical_prices.index.min()
+        self.trade_days = trade_days
+        if start_datetime is not None:
+            self.current_datetime = start_datetime
+        else:
+            self.current_datetime = choice(
+                self.historical_prices.index.to_list()[: -self.trade_days]
+            )
         self.initial_datetime = deepcopy(self.current_datetime)
+        self.max_delta_in_weights = max_delta_in_weights
+        self.initial_portfolio_value = None
 
     def preprocess_data(self) -> None:
         """
@@ -92,8 +103,15 @@ class BaseTradingEnv(gym.Env):
         Resets environment
         """
         super().reset(seed=seed)
-        self.current_datetime = deepcopy(self.initial_datetime)
+
+        self.current_datetime = choice(
+            self.historical_prices.index.to_list()[: -self.trade_days]
+        )
+
+        self.initial_datetime = deepcopy(self.current_datetime)
+
         self.current_portfolio = deepcopy(self.initial_portfolio)
+
         return self._get_state(), {
             "datetime": self.current_datetime,
             "portfolio": self.current_portfolio,
