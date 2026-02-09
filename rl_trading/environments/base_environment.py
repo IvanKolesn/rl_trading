@@ -21,6 +21,7 @@ class BaseTradingEnv(gym.Env):
         long_only: bool = True,  # todo: add shorting later
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
+        max_delta_in_weights: float = 0.25,
     ):
         """
         Gymnasium for trading
@@ -35,6 +36,8 @@ class BaseTradingEnv(gym.Env):
         self.long_only = long_only
         self.current_datetime = start_datetime or historical_prices.index.min()
         self.initial_datetime = deepcopy(self.current_datetime)
+        self.max_delta_in_weights = max_delta_in_weights
+        self.initial_portfolio_value = None
 
     def preprocess_data(self) -> None:
         """

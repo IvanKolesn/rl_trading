@@ -27,6 +27,7 @@ class FxTradingEnv(BaseTradingEnv):
         long_only: bool = True,  # todo: add shorting later
         base_currency: str = "usd",
         start_datetime: pd.Timestamp = None,
+        max_delta_in_weights: float = 0.25,  # Max 25% at once
     ):
         """
         Gymnasium environment for FX trading
@@ -38,6 +39,7 @@ class FxTradingEnv(BaseTradingEnv):
             long_only=long_only,
             base_currency=base_currency,
             start_datetime=start_datetime,
+            max_delta_in_weights=max_delta_in_weights,
         )
 
     def preprocess_data(self) -> None:
@@ -49,10 +51,11 @@ class FxTradingEnv(BaseTradingEnv):
 
         self.existing_currency_pairs = self.historical_prices.columns.copy().to_list()
         self.historical_prices = create_reverse_fx_tickers(self.historical_prices)
+        self.initial_portfolio_value = deepcopy(self.current_portfolio_value)
 
         self.action_space = gym.spaces.Box(
-            low=-1.0,
-            high=1.0,
+            low=-self.max_delta_in_weights,
+            high=self.max_delta_in_weights,
             shape=(len(self.existing_currency_pairs),),
             dtype=np.float32,
         )
@@ -139,8 +142,14 @@ class FxTradingEnv(BaseTradingEnv):
         penalty = False
         old_portfolio_value = self.current_portfolio_value
 
+        # Bankrupt
+        if old_portfolio_value < 1e-5:
+            return self._get_state(), 0, True, False, {}
+
         for single_action, currency_pair in zip(action, self.existing_currency_pairs):
-            if abs(single_action) < 1e-10:  # Skip near-zero actions
+
+            # Skip near-zero actions
+            if abs(single_action) < 1e-5:
                 continue
 
             if single_action < 0:
@@ -150,9 +159,11 @@ class FxTradingEnv(BaseTradingEnv):
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
                 mult_to = 1 / self.current_market[currency_pair]
 
+            # Leaving 0.5% of trade amount as buffer
             trade_amount = np.floor(
-                self.current_portfolio[fx_from] * abs(single_action)
+                self.current_portfolio[fx_from] * abs(single_action) * 0.995
             )
+
             if trade_amount > new_portfolio[fx_from]:
                 penalty = True
                 trade_amount = new_portfolio[fx_from]
@@ -165,21 +176,13 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_datetime = self._get_next_date()
         self.current_portfolio = new_portfolio
 
-        if penalty:
-            reward = -1.0
-        else:
-            # Use simple return for stability
-            new_portfolio_value = self.current_portfolio_value
-            if old_portfolio_value > 0:
-                reward = (
-                    new_portfolio_value - old_portfolio_value
-                ) / old_portfolio_value
-            else:
-                reward = 0.0
+        new_portfolio_value = self.current_portfolio_value
 
-        terminated = (
-            self.current_datetime == self.historical_prices.index.max() or penalty
-        )
+        reward = (
+            new_portfolio_value - old_portfolio_value
+        ) / old_portfolio_value - 0.5 * float(penalty)
+
+        terminated = self.current_datetime == self.historical_prices.index.max()
         truncated = False
 
         info = {
@@ -191,19 +194,27 @@ class FxTradingEnv(BaseTradingEnv):
 
     def _get_state(self) -> np.ndarray:
         """
-        Current balance, current rates, returns
-
-        Todo: add technical indicators
+        State representation
         """
+        # Current balances
         balances = np.fromiter(self.current_portfolio.values(), dtype=np.float32)
-        current_rates = self.current_market.to_numpy()
-        returns = (
-            self.historical_prices.loc[: str(self.current_datetime), :]
-            .tail(2)
-            .apply(np.log)
-            .diff()
-            .iloc[-1, :]
-            .to_numpy()
-        )
 
-        return np.concat([balances, current_rates, returns])
+        # Current exchange rates
+        current_rates = self.current_market.to_numpy()
+
+        # Recent returns and volatility
+        recent_data = self.historical_prices.loc[: str(self.current_datetime), :].tail(
+            20
+        )
+        returns = np.log(recent_data).diff().iloc[-15:].mean().to_numpy()
+        volatility = np.log(recent_data).diff().iloc[-15:].std().to_numpy()
+
+        # Portfolio metrics
+        portfolio_return = (
+            self.current_portfolio_value - self.initial_portfolio_value
+        ) / self.initial_portfolio_value
+
+        # Concatenate all features
+        return np.concatenate(
+            [balances, current_rates, returns, volatility, [portfolio_return]]
+        )
