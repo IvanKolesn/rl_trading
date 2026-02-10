@@ -150,9 +150,7 @@ class FxTradingEnv(BaseTradingEnv):
                 mult_to = 1 / self.current_market[currency_pair]
 
             # Leaving 0.5% of trade amount as buffer
-            trade_amount = np.floor(
-                self.current_portfolio[fx_from] * abs(single_action) * 0.995
-            )
+            trade_amount = self.current_portfolio[fx_from] * abs(single_action) * 0.995
             trade_amount = min(self.current_portfolio[fx_from], trade_amount)
 
             self.current_portfolio[fx_from] -= trade_amount
