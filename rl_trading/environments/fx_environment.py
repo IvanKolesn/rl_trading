@@ -2,6 +2,8 @@
 Gym environment for FX trading
 """
 
+import random
+
 from copy import deepcopy
 from typing import Union
 
@@ -115,28 +117,11 @@ class FxTradingEnv(BaseTradingEnv):
                         portfolio_in_base_ccy[ccy_name] = amount * rate
                     else:
                         raise KeyError(
-                            f"No exchange rate found for {ccy_name} to {self.trading_params["base_currency"]}"
+                            f"No exchange rate found for {ccy_name} to "
+                            f"{self.trading_params["base_currency"]}"
                         )
 
         return portfolio_in_base_ccy
-
-    @property
-    def current_portfolio_value(self) -> float:
-        """
-        Get current portfolio value in base currency
-        """
-        return sum(self._convert_portfolio_to_base_ccy().values())
-
-    @property
-    def current_portfolio_weights(self) -> dict:
-        """
-        Get current portfolio weights
-        """
-        portfolio = self._convert_portfolio_to_base_ccy()
-        total_value = sum(portfolio.values())
-        if total_value == 0:
-            return {ccy: 0.0 for ccy in portfolio}
-        return {ccy: value / total_value for ccy, value in portfolio.items()}
 
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
@@ -146,16 +131,16 @@ class FxTradingEnv(BaseTradingEnv):
         2. Compute new portfolio
         3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
         """
-        new_portfolio = deepcopy(self.current_portfolio)
-
-        # penalty = False
-        old_portfolio_value = self.current_portfolio_value
+        old_portfolio_value = deepcopy(self.current_portfolio_value)
 
         # Bankrupt
-        if old_portfolio_value < 1e-5:
+        if self.current_portfolio_value < 1e-5:
             return self._get_state(), 0, True, False, {}
 
-        for single_action, currency_pair in zip(action, self.existing_currency_pairs):
+        combined_actions = list(zip(action, self.existing_currency_pairs))
+        random.shuffle(combined_actions)
+
+        for single_action, currency_pair in combined_actions:
 
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
@@ -168,22 +153,19 @@ class FxTradingEnv(BaseTradingEnv):
             trade_amount = np.floor(
                 self.current_portfolio[fx_from] * abs(single_action) * 0.995
             )
-            trade_amount = min(new_portfolio[fx_from], trade_amount)
+            trade_amount = min(self.current_portfolio[fx_from], trade_amount)
 
-            new_portfolio[fx_from] -= trade_amount
-            new_portfolio[fx_to] += (
+            self.current_portfolio[fx_from] -= trade_amount
+            self.current_portfolio[fx_to] += (
                 trade_amount * mult_to * (1 - self.trading_params["trade_fee"])
             )
 
         self.current_datetime = self._get_next_date()
-        self.current_portfolio = new_portfolio
-
-        new_portfolio_value = self.current_portfolio_value
 
         # if penalty:
         #     reward = -1
         # else:
-        reward = np.log(new_portfolio_value / old_portfolio_value)
+        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 100
 
         terminated = self.current_datetime == self.historical_prices.index.max()
         truncated = (

@@ -13,7 +13,7 @@ import numpy as np
 from gymnasium.core import ActType, ObsType
 
 DEFAULT_TRADING_PARAMS = {
-    "trade_fee": 0.001,  # 10 bp
+    "trade_fee": 0.0001,  # 1 bp
     "long_only": True,  # todo: add shorting later
     "base_currency": "usd",
     "max_delta_in_weights": 0.25,
@@ -21,6 +21,9 @@ DEFAULT_TRADING_PARAMS = {
 
 
 class BaseTradingEnv(gym.Env):
+    """
+    Gymnasium for trading
+    """
 
     def __init__(
         self,
@@ -63,9 +66,11 @@ class BaseTradingEnv(gym.Env):
         if self.current_datetime not in self.historical_prices.index:
             raise KeyError(f"{self.current_datetime} is missing in data")
 
-    def _convert_portfolio_to_base_ccy(self) -> dict:
+    def _convert_portfolio_to_base_ccy(self) -> dict[str, float]:
         """
         converts portfolio to base currency
+
+        returns dict [ticker, value in base currency]
         """
 
     @property
@@ -76,10 +81,11 @@ class BaseTradingEnv(gym.Env):
         return self.historical_prices.loc[self.current_datetime, :]
 
     @property
-    def current_portfolio_value(self):
+    def current_portfolio_value(self) -> float:
         """
         Get current portfolio value in base currency
         """
+        return sum(self._convert_portfolio_to_base_ccy().values())
 
     @property
     def _eligible_start_times(self):
@@ -88,10 +94,15 @@ class BaseTradingEnv(gym.Env):
         """
 
     @property
-    def current_portfolio_weights(self):
+    def current_portfolio_weights(self) -> dict[str, float]:
         """
         Get current portfolio weights
         """
+        portfolio = self._convert_portfolio_to_base_ccy()
+        total_value = sum(portfolio.values())
+        if total_value == 0:
+            return {ccy: 0.0 for ccy in portfolio}
+        return {ccy: value / total_value for ccy, value in portfolio.items()}
 
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
