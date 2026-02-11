@@ -46,8 +46,10 @@ class BaseTradingEnv(gym.Env):
 
         if start_datetime is not None:
             self.current_datetime = start_datetime
+            self.random_date = False
         else:
             self.current_datetime = self._get_random_start_date()
+            self.random_date = True
 
         self.initial_datetime = deepcopy(self.current_datetime)
         self.initial_portfolio_value = None
@@ -118,7 +120,8 @@ class BaseTradingEnv(gym.Env):
         return self._get_state().shape
 
     def _get_next_date(self) -> pd.Timestamp:
-        return self.historical_prices.loc[str(self.current_datetime) :, :].index[1]
+        pos = self.historical_prices.index.get_loc(self.current_datetime)
+        return self.historical_prices.index[pos + 1]
 
     def _get_random_start_date(self):
         if self.episode_length_days >= len(self._eligible_start_times):
@@ -131,8 +134,11 @@ class BaseTradingEnv(gym.Env):
         """
         super().reset(seed=seed)
 
-        self.current_datetime = self._get_random_start_date()
-        self.initial_datetime = deepcopy(self.current_datetime)
+        if self.random_date:
+            self.current_datetime = self._get_random_start_date()
+            self.initial_datetime = deepcopy(self.current_datetime)
+        else:
+            self.current_datetime = deepcopy(self.initial_datetime)
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
 

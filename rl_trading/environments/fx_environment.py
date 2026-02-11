@@ -55,6 +55,7 @@ class FxTradingEnv(BaseTradingEnv):
         2. Create reverse tickers
         """
         super().preprocess_data()
+        self._validate_inputs()
 
         self.existing_currency_pairs = self.historical_prices.columns.copy().to_list()
         self.historical_prices = create_reverse_fx_tickers(self.historical_prices)
@@ -149,9 +150,10 @@ class FxTradingEnv(BaseTradingEnv):
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
                 mult_to = 1 / self.current_market[currency_pair]
 
-            # Leaving 0.5% of trade amount as buffer
-            trade_amount = self.current_portfolio[fx_from] * abs(single_action) * 0.995
-            trade_amount = min(self.current_portfolio[fx_from], trade_amount)
+            trade_amount = min(
+                self.current_portfolio[fx_from],
+                self.current_portfolio[fx_from] * abs(single_action),
+            )
 
             self.current_portfolio[fx_from] -= trade_amount
             self.current_portfolio[fx_to] += (
@@ -160,10 +162,8 @@ class FxTradingEnv(BaseTradingEnv):
 
         self.current_datetime = self._get_next_date()
 
-        # if penalty:
-        #     reward = -1
-        # else:
-        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 100
+        # in basis points
+        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 10_000
 
         terminated = self.current_datetime == self.historical_prices.index.max()
         truncated = (
@@ -182,8 +182,8 @@ class FxTradingEnv(BaseTradingEnv):
         State representation
         """
 
-        current_weights = np.fromiter(
-            self.current_portfolio_weights.values(), dtype=np.float32
+        current_weights = np.array(
+            [self.current_portfolio_weights[x] for x in self.all_currencies]
         )
 
         all_indicators = (
