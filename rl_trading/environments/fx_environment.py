@@ -53,13 +53,14 @@ class FxTradingEnv(BaseTradingEnv):
         """
         1. Validate inputs
         2. Create reverse tickers
+        3. Set action space and observation space
         """
         super().preprocess_data()
         self._validate_inputs()
 
         self.existing_currency_pairs = self.historical_prices.columns.copy().to_list()
         self.historical_prices = create_reverse_fx_tickers(self.historical_prices)
-        self.initial_portfolio_value = deepcopy(self.current_portfolio_value)
+        self.initial_portfolio_value = self.current_portfolio_value
 
         self.action_space = gym.spaces.Box(
             low=-self.trading_params["max_delta_in_weights"],
@@ -68,7 +69,6 @@ class FxTradingEnv(BaseTradingEnv):
             dtype=np.float32,
         )
 
-        # State space = balances, exchange rates, technical indicators, etc
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=self._get_state_dim(), dtype=np.float32
         )
@@ -92,6 +92,11 @@ class FxTradingEnv(BaseTradingEnv):
 
     @property
     def _eligible_start_times(self):
+        """
+        Get new start date for algorithm
+
+        We skip first date to ensure no NaN in _get_state
+        """
         return self.historical_prices.index[
             (self.historical_prices.index.hour == 9)
             & (self.historical_prices.index.minute < 1)
@@ -107,20 +112,10 @@ class FxTradingEnv(BaseTradingEnv):
             if ccy_name == self.trading_params["base_currency"]:
                 portfolio_in_base_ccy[ccy_name] = amount
             else:
-                direct_pair = ccy_name + self.trading_params["base_currency"]
-                if direct_pair in self.current_market:
-                    rate = float(self.current_market[direct_pair])
-                    portfolio_in_base_ccy[ccy_name] = amount * rate
-                else:
-                    reverse_pair = self.trading_params["base_currency"] + ccy_name
-                    if reverse_pair in self.current_market:
-                        rate = 1.0 / float(self.current_market[reverse_pair])
-                        portfolio_in_base_ccy[ccy_name] = amount * rate
-                    else:
-                        raise KeyError(
-                            f"No exchange rate found for {ccy_name} to "
-                            f"{self.trading_params["base_currency"]}"
-                        )
+                pair = ccy_name + self.trading_params["base_currency"]
+                portfolio_in_base_ccy[ccy_name] = amount * float(
+                    self.market_on_date(self.current_datetime)[pair]
+                )
 
         return portfolio_in_base_ccy
 
@@ -132,7 +127,7 @@ class FxTradingEnv(BaseTradingEnv):
         2. Compute new portfolio
         3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
         """
-        old_portfolio_value = deepcopy(self.current_portfolio_value)
+        old_portfolio_value = self.current_portfolio_value
 
         # Bankrupt
         if self.current_portfolio_value < 1e-5:
@@ -145,10 +140,10 @@ class FxTradingEnv(BaseTradingEnv):
 
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
-                mult_to = self.current_market[currency_pair]
             else:
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
-                mult_to = 1 / self.current_market[currency_pair]
+
+            mult_to = self.market_on_date(self.current_datetime)[fx_from + fx_to]
 
             trade_amount = min(
                 self.current_portfolio[fx_from],

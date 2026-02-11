@@ -6,6 +6,8 @@ from typing import Union
 from copy import deepcopy
 from random import choice
 
+from functools import lru_cache
+
 import gymnasium as gym
 import pandas as pd
 import numpy as np
@@ -75,12 +77,12 @@ class BaseTradingEnv(gym.Env):
         returns dict [ticker, value in base currency]
         """
 
-    @property
-    def current_market(self):
+    @lru_cache()
+    def market_on_date(self, date: pd.Timestamp):
         """
         Get current market snapshot
         """
-        return self.historical_prices.loc[self.current_datetime, :]
+        return self.historical_prices.loc[date, :]
 
     @property
     def current_portfolio_value(self) -> float:
@@ -116,14 +118,14 @@ class BaseTradingEnv(gym.Env):
         Current balance, current rates, returns, etc
         """
 
-    def _get_state_dim(self) -> tuple[float]:
+    def _get_state_dim(self) -> tuple[int]:
         return self._get_state().shape
 
     def _get_next_date(self) -> pd.Timestamp:
         pos = self.historical_prices.index.get_loc(self.current_datetime)
         return self.historical_prices.index[pos + 1]
 
-    def _get_random_start_date(self):
+    def _get_random_start_date(self) -> pd.Timestamp:
         if self.episode_length_days >= len(self._eligible_start_times):
             return self._eligible_start_times[0]
         return choice(self._eligible_start_times[: -self.episode_length_days])
