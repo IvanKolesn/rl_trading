@@ -24,11 +24,12 @@ class FXModel(TorchModelV2, nn.Module):
         self.main_net = nn.Sequential(
             nn.Linear(obs_dim, 256),
             nn.GELU(),
-            nn.Dropout(0.2),
+            nn.LayerNorm(256),
             nn.Linear(256, 128),
             nn.GELU(),
-            nn.Dropout(0.2),
+            nn.LayerNorm(128),
             nn.Linear(128, 64),
+            nn.LayerNorm(64),
             nn.ReLU(),
         )
 
