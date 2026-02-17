@@ -70,9 +70,9 @@ class BaseTradingEnv(gym.Env):
         """
         validate inputs
         """
-        self.existing_tickers = {
-            ccy for x in self.historical_prices.values() for ccy in x.keys()
-        }
+
+        ticker_set = {ccy for x in self.historical_prices.values() for ccy in x.keys()}
+        self.existing_tickers = sorted(ticker_set)
 
         self.action_space = gym.spaces.Box(
             low=-self.trading_params["max_delta_in_weights"],

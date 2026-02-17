@@ -76,9 +76,8 @@ class FxTradingEnv(BaseTradingEnv):
         """
         super()._validate_inputs()
 
-        self.all_currencies = {
-            y for x in self.existing_tickers for y in (x[:3], x[-3:])
-        }
+        currency_set = {y for x in self.existing_tickers for y in (x[:3], x[-3:])}
+        self.all_currencies = sorted(currency_set)
 
         for x in self.all_currencies:
             self.current_portfolio[x] = self.current_portfolio.get(x, 0)
@@ -140,7 +139,16 @@ class FxTradingEnv(BaseTradingEnv):
             self.current_portfolio[fx_to] += (
                 trade_amount
                 * current_market[fx_from + fx_to]
-                * (1 - self.trading_params["trade_fee"])
+                * (
+                    1
+                    - self.trading_params["trade_fee"]
+                    - abs(
+                        np.random.normal(
+                            loc=self.trading_params["slippage"][0],
+                            scale=self.trading_params["slippage"][1],
+                        )
+                    )
+                )
             )
 
         self.current_idx += 1
@@ -166,9 +174,7 @@ class FxTradingEnv(BaseTradingEnv):
         State representation
         """
         current_weights = self.current_portfolio_weights
-        current_weights = np.array(
-            [current_weights[x] for x in self.all_currencies]
-        )
+        current_weights = np.array([current_weights[x] for x in self.all_currencies])
 
         all_indicators = np.fromiter(
             self.features_dataset[self.current_datetime].values(), dtype=np.float32
