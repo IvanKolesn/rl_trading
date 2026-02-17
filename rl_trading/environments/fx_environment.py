@@ -6,6 +6,7 @@ import random
 
 from copy import deepcopy
 from typing import Union
+from functools import cached_property
 
 import pandas as pd
 import numpy as np
@@ -18,7 +19,6 @@ from rl_trading.environments.base_environment import (
     DEFAULT_TRADING_PARAMS,
 )
 from rl_trading.environments.data_processing import (
-    get_unique_currencies,
     create_reverse_fx_tickers,
 )
 
@@ -58,16 +58,13 @@ class FxTradingEnv(BaseTradingEnv):
         super().preprocess_data()
         self._validate_inputs()
 
-        self.existing_currency_pairs = self.historical_prices.columns.copy().to_list()
-        self.historical_prices = create_reverse_fx_tickers(self.historical_prices)
-        self.initial_portfolio_value = self.current_portfolio_value
-
-        self.action_space = gym.spaces.Box(
-            low=-self.trading_params["max_delta_in_weights"],
-            high=self.trading_params["max_delta_in_weights"],
-            shape=(len(self.existing_currency_pairs),),
-            dtype=np.float32,
+        # todo: re-write create_reverse_fx_tickers for dict
+        self.historical_prices = create_reverse_fx_tickers(
+            pd.DataFrame.from_dict(self.historical_prices, orient="index")
         )
+        self.historical_prices = self.historical_prices.to_dict(orient="index")
+
+        self.initial_portfolio_value = self.current_portfolio_value
 
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=self._get_state_dim(), dtype=np.float32
@@ -79,7 +76,9 @@ class FxTradingEnv(BaseTradingEnv):
         """
         super()._validate_inputs()
 
-        self.all_currencies = get_unique_currencies(self.historical_prices)
+        self.all_currencies = {
+            y for x in self.existing_tickers for y in (x[:3], x[-3:])
+        }
 
         for x in self.all_currencies:
             self.current_portfolio[x] = self.current_portfolio.get(x, 0)
@@ -90,32 +89,19 @@ class FxTradingEnv(BaseTradingEnv):
             if x not in self.all_currencies:
                 raise KeyError(f"ccy {x} has no history")
 
-    @property
-    def _eligible_start_times(self):
-        """
-        Get new start date for algorithm
-
-        We skip first date to ensure no NaN in _get_state
-        """
-        return self.historical_prices.index[
-            (self.historical_prices.index.hour == 9)
-            & (self.historical_prices.index.minute < 1)
-        ].to_list()[1:]
-
     def _convert_portfolio_to_base_ccy(self) -> dict:
         """
         converts portfolio to base currency
         """
         portfolio_in_base_ccy = {}
+        current_market = self.market_on_date
 
         for ccy_name, amount in self.current_portfolio.items():
             if ccy_name == self.trading_params["base_currency"]:
                 portfolio_in_base_ccy[ccy_name] = amount
             else:
                 pair = ccy_name + self.trading_params["base_currency"]
-                portfolio_in_base_ccy[ccy_name] = amount * float(
-                    self.market_on_date(self.current_datetime)[pair]
-                )
+                portfolio_in_base_ccy[ccy_name] = amount * float(current_market[pair])
 
         return portfolio_in_base_ccy
 
@@ -130,10 +116,12 @@ class FxTradingEnv(BaseTradingEnv):
         old_portfolio_value = self.current_portfolio_value
 
         # Bankrupt
-        if self.current_portfolio_value < 1e-5:
+        if old_portfolio_value < 1e-5:
             return self._get_state(), 0, True, False, {}
 
-        combined_actions = list(zip(action, self.existing_currency_pairs))
+        current_market = self.market_on_date
+
+        combined_actions = list(zip(action, self.existing_tickers))
         random.shuffle(combined_actions)
 
         for single_action, currency_pair in combined_actions:
@@ -143,8 +131,6 @@ class FxTradingEnv(BaseTradingEnv):
             else:
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
 
-            mult_to = self.market_on_date(self.current_datetime)[fx_from + fx_to]
-
             trade_amount = min(
                 self.current_portfolio[fx_from],
                 self.current_portfolio[fx_from] * abs(single_action),
@@ -152,15 +138,18 @@ class FxTradingEnv(BaseTradingEnv):
 
             self.current_portfolio[fx_from] -= trade_amount
             self.current_portfolio[fx_to] += (
-                trade_amount * mult_to * (1 - self.trading_params["trade_fee"])
+                trade_amount
+                * current_market[fx_from + fx_to]
+                * (1 - self.trading_params["trade_fee"])
             )
 
-        self.current_datetime = self._get_next_date()
+        self.current_idx += 1
+        self.current_datetime = self._all_dates[self.current_idx]
 
         # in basis points
         reward = np.log(self.current_portfolio_value / old_portfolio_value) * 10_000
 
-        terminated = self.current_datetime == self.historical_prices.index.max()
+        terminated = self.current_datetime == self._last_date
         truncated = (
             self.current_datetime - self.initial_datetime
         ).days >= self.episode_length_days
@@ -176,13 +165,13 @@ class FxTradingEnv(BaseTradingEnv):
         """
         State representation
         """
-
+        current_weights = self.current_portfolio_weights
         current_weights = np.array(
-            [self.current_portfolio_weights[x] for x in self.all_currencies]
+            [current_weights[x] for x in self.all_currencies]
         )
 
-        all_indicators = (
-            self.features_dataset.loc[self.current_datetime, :].to_numpy().flatten()
+        all_indicators = np.fromiter(
+            self.features_dataset[self.current_datetime].values(), dtype=np.float32
         )
 
         return np.concatenate([current_weights, np.array(all_indicators)])
