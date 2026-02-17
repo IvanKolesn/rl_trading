@@ -2,6 +2,8 @@
 
 This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for an foreign exchange (FX) trading (high-, mid-, low-frequency). It includes data preprocessing, feature preparation, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
 
+It was decided not to use [FinRL](https://github.com/AI4Finance-Foundation/FinRL) and [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster) to build the environment and model from scratch.
+
 ---
 
 ## Overview
