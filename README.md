@@ -1,36 +1,32 @@
 # RL Trading: Reinforcement Learning for FX Trading
 
-This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for foreign exchange (FX) trading, designed for reinforcement learning experiments. It includes data preprocessing, technical indicator computation, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html) with PPO.
+This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for an foreign exchange (FX) trading (high-, mid-, low-frequency). It includes data preprocessing, feature preparation, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
 
 ---
 
 ## Overview
 
-The goal is to train an agent to trade multiple currency pairs by modeling **flows** for each currency pair at every time step. The environment simulates realistic trading conditions including:
+The goal is to train an agent to trade multiple currency pairs by modeling flows for each currency pair at every time step. The environment simulates realistic trading conditions including:
 
-- Transaction fees (basis points)
-- Slippage (stochastic)
+- Transaction fees
+- Stochastic slippage
 - Long‑only positions (extendable to shorting)
 - Realistic price data (1‑minute FX bars)
 
-The observation space consists of **current portfolio weights** (for all currencies) and a set of **technical indicators**. Actions are continuous deltas applied to each currency pair.
+The observation space consists of current portfolio weights (for all currencies) and a set of technical indicators. Actions are continuous and are computed for each currency pair.
 
-We decided **not** to optimize portfolio weights directly. For a portfolio containing, e.g., {USD, EUR, JPY}, an agent can purchase JPY using both USD and EUR simultaneously—a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades.
+We decided not to optimize portfolio weights directly. For a portfolio containing multiple currencies, e.g., {USD, EUR, JPY}, an agent can purchase JPY using both USD and EUR simultaneously - a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades.
 
 ---
 
 ## Installation
 
-### Requirements
-- Python 3.11–3.12
-- Dependencies listed in `pyproject.toml`
+All nessesary info and dependencies are listed in `pyproject.toml`
 
 Install the package locally:
-```bash
-git clone https://github.com/yourusername/rl_trading.git
-cd rl_trading
-pip install -e .
-```
+
+1. Clone the repository or load it as zip
+2. Install it using `pip install`
 
 ---
 
