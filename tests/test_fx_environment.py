@@ -7,6 +7,11 @@ import pandas as pd
 import numpy as np
 
 from rl_trading.environments.fx_environment import FxTradingEnv
+from rl_trading.environments.base_environment import DEFAULT_TRADING_PARAMS
+
+TRADING_PARAMS = DEFAULT_TRADING_PARAMS.copy()
+TRADING_PARAMS["base_currency"] = "usd"
+TRADING_PARAMS["slippage"] = (0, 0)
 
 
 class TestFxTradingEnv:
@@ -18,10 +23,15 @@ class TestFxTradingEnv:
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
         """Test conversion to base currency when base is USD"""
+
+        # Create features dataset with same index as historical data
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
             initial_portfolio=mixed_portfolio,
-            base_currency="usd",
+            trading_params=TRADING_PARAMS,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
         env.preprocess_data()
@@ -30,8 +40,8 @@ class TestFxTradingEnv:
         portfolio_in_base = env._convert_portfolio_to_base_ccy()
 
         # USD: 500 USD = 500 USD
-        # EUR: 300 EUR = 300 * 2.0 = 600 USD (since 1 EUR = 2 USD)
-        # JPY: 200 JPY = 200 / 110.0 = 1.818 USD (since 1 USD = 110 JPY, so 1 JPY = 1/110 USD)
+        # EUR: 300 EUR = 300 * 2.0 = 600 USD
+        # JPY: 200 JPY = 200 / 110.0 = 1.818 USD (since 1 USD = 110 JPY)
         expected_usd = 500
         expected_eur_in_usd = 300 * 2.0
         expected_jpy_in_usd = 200 / 110.0
@@ -43,13 +53,17 @@ class TestFxTradingEnv:
     def test_portfolio_conversion_eur_base(
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
-        """
-        Test conversion to base currency when base is EUR
-        """
+        """Test conversion to base currency when base is EUR"""
+        trading_params = TRADING_PARAMS.copy()
+        trading_params["base_currency"] = "eur"
+
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
             initial_portfolio=mixed_portfolio,
-            base_currency="eur",
+            trading_params=trading_params,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
         env.preprocess_data()
@@ -58,8 +72,8 @@ class TestFxTradingEnv:
         portfolio_in_base = env._convert_portfolio_to_base_ccy()
 
         # EUR: 300 EUR = 300 EUR
-        # USD: 500 USD = 500 * (1/2.0) = 250 EUR (since 1 USD = 0.5 EUR)
-        # JPY: 200 JPY = 200 / 100.0 = 2 EUR (since 1 EUR = 100 JPY)
+        # USD: 500 USD = 500 * (1/2.0) = 250 EUR
+        # JPY: 200 JPY = 200 / 100.0 = 2 EUR
         expected_eur = 300
         expected_usd_in_eur = 500 * (1 / 2.0)
         expected_jpy_in_eur = 200 / 100.0
@@ -71,11 +85,13 @@ class TestFxTradingEnv:
     def test_zero_action_no_change(
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
-        """
-        Test that portfolio stays the same with zero actions
-        """
+        """Test that portfolio amounts stay the same with zero actions"""
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
+            trading_params=TRADING_PARAMS,
             initial_portfolio=mixed_portfolio,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
@@ -85,33 +101,35 @@ class TestFxTradingEnv:
         initial_value = env.current_portfolio_value
 
         # Take a step with zero action
-        zero_action = np.zeros(len(env.existing_currency_pairs), dtype=np.float32)
+        zero_action = np.zeros(len(env.existing_tickers), dtype=np.float32)
         state, reward, terminated, truncated, info = env.step(zero_action)
 
         # Portfolio amounts should remain unchanged
         assert env.current_portfolio == initial_portfolio
 
         # Portfolio value may change due to exchange rate movements
-        # Reward should reflect the change in portfolio value
         new_value = env.current_portfolio_value
-        expected_reward = (new_value - initial_value) / initial_value
+        # Reward is log return * 10,000 (basis points)
+        expected_reward = np.log(new_value / initial_value) * 10_000
         assert reward == pytest.approx(expected_reward, rel=1e-10)
 
     def test_reset_functionality(
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
-        """
-        Test that reset returns environment to initial state
-        """
+        """Test that reset returns environment to initial state"""
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
+            trading_params=TRADING_PARAMS,
             initial_portfolio=mixed_portfolio,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
         env.preprocess_data()
 
         # Take a few steps
-        zero_action = np.zeros(len(env.existing_currency_pairs), dtype=np.float32)
+        zero_action = np.zeros(len(env.existing_tickers), dtype=np.float32)
         env.step(zero_action)  # Move to day 2
         env.step(zero_action)  # Move to day 3
 
@@ -129,12 +147,14 @@ class TestFxTradingEnv:
     def test_portfolio_weights_sum_to_one(
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
-        """
-        Test that portfolio weights sum to 1
-        """
+        """Test that portfolio weights sum to 1"""
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
             initial_portfolio=mixed_portfolio,
+            trading_params=TRADING_PARAMS,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
         env.preprocess_data()
@@ -145,15 +165,17 @@ class TestFxTradingEnv:
         assert total_weight == pytest.approx(1.0, rel=1e-10)
 
     def test_missing_history_raises_error(self, incomplete_historical_data):
-        """
-        Test that missing history for a currency raises an error
-        """
+        """Test that missing history for a currency raises an error"""
         # Portfolio has JPY but historical data only has EURUSD
         portfolio = {"usd": 1000, "eur": 500, "jpy": 300}
 
+        features = pd.DataFrame(index=incomplete_historical_data.index)
+
         env = FxTradingEnv(
             historical_prices=incomplete_historical_data,
+            features_dataset=features,
             initial_portfolio=portfolio,
+            trading_params=TRADING_PARAMS,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
 
@@ -164,15 +186,17 @@ class TestFxTradingEnv:
     def test_missing_currency_in_initial_portfolio(
         self, historical_exchange_rate_extended
     ):
-        """
-        Test that missing currency in initial portfolio is set to 0
-        """
+        """Test that missing currency in initial portfolio is set to 0"""
         # Initial portfolio missing JPY
         initial_portfolio = {"usd": 1000, "eur": 500}
 
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
             initial_portfolio=initial_portfolio,
+            trading_params=TRADING_PARAMS,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
 
@@ -190,13 +214,15 @@ class TestFxTradingEnv:
     def test_portfolio_value_calculation(
         self, historical_exchange_rate_extended, mixed_portfolio
     ):
-        """
-        Test that portfolio value is calculated correctly
-        """
+        """Test that portfolio value is calculated correctly"""
+
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
             initial_portfolio=mixed_portfolio,
-            base_currency="usd",
+            trading_params=TRADING_PARAMS,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
         env.preprocess_data()
@@ -213,20 +239,25 @@ class TestFxTradingEnv:
     def test_step_with_trade(
         self, historical_exchange_rate_extended, usd_only_portfolio
     ):
-        """
-        Test that trading works correctly
-        """
+        """Test that trading works correctly"""
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
+            trading_params=TRADING_PARAMS,
             initial_portfolio=usd_only_portfolio,
             start_datetime=pd.Timestamp("2024-12-01"),
+            episode_length_days=5,
         )
         env.preprocess_data()
 
+        # Get sorted tickers for deterministic index
+        tickers = sorted(env.existing_tickers)
+        eurusd_idx = tickers.index("eurusd")
+
         # Action: convert 50% of USD to EUR using EURUSD pair
-        # existing_currency_pairs will be ['eurusd', 'usdjpy', 'eurjpy']
-        action = np.zeros(3, dtype=np.float32)
-        eurusd_idx = env.existing_currency_pairs.index("eurusd")
+        action = np.zeros(len(tickers), dtype=np.float32)
         action[eurusd_idx] = 0.5  # Positive means buy EUR with USD
 
         initial_value = env.current_portfolio_value
@@ -234,8 +265,9 @@ class TestFxTradingEnv:
 
         # Check portfolio after trade
         # 50% of 1000 USD = 500 USD traded
-        # EUR received = 500 * (1/2.0) * (1 - 0.001 fee) = 250 * 0.999 = 249.75
-        expected_eur = 500 / 2.0 * (1 - env.fees["general"])
+        # EUR received = 500 * (1/2.0) * (1 - trade_fee) = 250 * (1 - 0.0001) = 249.975
+        fee = env.trading_params["trade_fee"]
+        expected_eur = 500 / 2.0 * (1 - fee)
         expected_usd = 500  # Remaining USD
 
         assert env.current_portfolio["eur"] == pytest.approx(expected_eur, rel=1e-3)
@@ -245,43 +277,61 @@ class TestFxTradingEnv:
         # Check that datetime advanced
         assert env.current_datetime == pd.Timestamp("2024-12-02")
 
-        # Check that reward was calculated
+        # Check that reward was calculated (should be slightly negative due to fee)
         assert not terminated
         assert not truncated
 
-    def test_penalty_for_insufficient_funds(
+    def test_trade_capped_by_available_funds(
         self, historical_exchange_rate_extended, usd_only_portfolio
     ):
-        """
-        Test penalty when trying to sell more than available
-        """
+        """Test that trying to sell more than available caps the trade (no penalty)"""
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
+            trading_params=TRADING_PARAMS,
             initial_portfolio=usd_only_portfolio,
             start_datetime=pd.Timestamp("2024-12-01"),
+            episode_length_days=5,
         )
         env.preprocess_data()
 
-        # Try to sell 150% of USD (more than available)
-        action = np.zeros(3, dtype=np.float32)
-        eurusd_idx = env.existing_currency_pairs.index("eurusd")
-        action[eurusd_idx] = 1.5  # More than 100%
+        tickers = sorted(env.existing_tickers)
+        eurusd_idx = tickers.index("eurusd")
 
+        # Try to sell 150% of USD (more than available)
+        action = np.zeros(len(tickers), dtype=np.float32)
+        action[eurusd_idx] = 1.5
+
+        old_value = env.current_portfolio_value
         state, reward, terminated, truncated, info = env.step(action)
 
-        # Should get penalty reward
-        assert reward == -1.0
-        assert terminated == True  # Should terminate on penalty
-        # All USD should have been traded (since we tried to trade 150% but only 100% was available)
-        assert env.current_portfolio["usd"] == 0.0
+        # Trade should be capped at 100% of USD
+        # USD becomes 0, EUR received = 1000 / 2.0 * (1 - fee)
+        fee = env.trading_params["trade_fee"]
+        expected_eur = 1000 / 2.0 * (1 - fee)
+        expected_usd = 0
+
+        assert env.current_portfolio["usd"] == pytest.approx(expected_usd, rel=1e-3)
+        assert env.current_portfolio["eur"] == pytest.approx(expected_eur, rel=1e-3)
+
+        # No termination, reward computed normally
+        new_value = env.current_portfolio_value
+        expected_reward = np.log(new_value / old_value) * 10_000
+        assert reward == pytest.approx(expected_reward, rel=1e-3)
+        assert not terminated
+        assert not truncated
 
     def test_empty_portfolio_zero_value(self, historical_exchange_rate_extended):
-        """
-        Test that empty portfolio has zero value
-        """
+        """Test that empty portfolio has zero value"""
         empty_portfolio = {"usd": 0, "eur": 0, "jpy": 0}
+        features = pd.DataFrame(index=historical_exchange_rate_extended.index)
+
         env = FxTradingEnv(
             historical_prices=historical_exchange_rate_extended,
+            features_dataset=features,
+            trading_params=TRADING_PARAMS,
             initial_portfolio=empty_portfolio,
             start_datetime=pd.Timestamp("2024-12-01"),
         )
@@ -289,5 +339,5 @@ class TestFxTradingEnv:
 
         assert env.current_portfolio_value == 0.0
         weights = env.current_portfolio_weights
-        # All weights should be 0 (or handle division by zero gracefully)
+        # All weights should be 0
         assert all(w == 0.0 for w in weights.values())

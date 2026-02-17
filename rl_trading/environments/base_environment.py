@@ -7,6 +7,7 @@ from copy import deepcopy
 from random import choice
 
 from functools import lru_cache
+from functools import cached_property
 
 import gymnasium as gym
 import pandas as pd
@@ -16,6 +17,7 @@ from gymnasium.core import ActType, ObsType
 
 DEFAULT_TRADING_PARAMS = {
     "trade_fee": 0.0001,  # 1 bp
+    "slippage": (0.0001, 0.0002),  # abs( N(0.0001, 0.0002) )
     "long_only": True,  # todo: add shorting later
     "base_currency": "usd",
     "max_delta_in_weights": 0.25,
@@ -35,16 +37,23 @@ class BaseTradingEnv(gym.Env):
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
         episode_length_days: int = 1,
+        seed: int = 42,
     ):
         """
         Gymnasium for trading
         """
+
+        np.random.seed(seed)
+
         self.initial_portfolio = deepcopy(initial_portfolio)
         self.current_portfolio = deepcopy(initial_portfolio)
-        self.historical_prices = historical_prices
-        self.features_dataset = features_dataset
+        self.historical_prices = historical_prices.to_dict(orient="index")
+        self.features_dataset = features_dataset.to_dict(orient="index")
         self.trading_params = trading_params
         self.episode_length_days = int(episode_length_days)
+
+        self._all_dates = list(self.historical_prices.keys())
+        self._last_date = max(self._all_dates)
 
         if start_datetime is not None:
             self.current_datetime = start_datetime
@@ -53,6 +62,7 @@ class BaseTradingEnv(gym.Env):
             self.current_datetime = self._get_random_start_date()
             self.random_date = True
 
+        self.current_idx = self._all_dates.index(self.current_datetime)
         self.initial_datetime = deepcopy(self.current_datetime)
         self.initial_portfolio_value = None
 
@@ -60,14 +70,23 @@ class BaseTradingEnv(gym.Env):
         """
         validate inputs
         """
-        self._validate_inputs()
+
+        ticker_set = {ccy for x in self.historical_prices.values() for ccy in x.keys()}
+        self.existing_tickers = sorted(ticker_set)
+
+        self.action_space = gym.spaces.Box(
+            low=-self.trading_params["max_delta_in_weights"],
+            high=self.trading_params["max_delta_in_weights"],
+            shape=(len(self.existing_tickers),),
+            dtype=np.float32,
+        )
 
     def _validate_inputs(self) -> None:
         """
         Check validity of price history and current portfolio
         """
 
-        if self.current_datetime not in self.historical_prices.index:
+        if self.current_datetime not in self.historical_prices:
             raise KeyError(f"{self.current_datetime} is missing in data")
 
     def _convert_portfolio_to_base_ccy(self) -> dict[str, float]:
@@ -77,12 +96,12 @@ class BaseTradingEnv(gym.Env):
         returns dict [ticker, value in base currency]
         """
 
-    @lru_cache()
-    def market_on_date(self, date: pd.Timestamp):
+    @property
+    def market_on_date(self):
         """
         Get current market snapshot
         """
-        return self.historical_prices.loc[date, :]
+        return self.historical_prices[self.current_datetime]
 
     @property
     def current_portfolio_value(self) -> float:
@@ -96,6 +115,7 @@ class BaseTradingEnv(gym.Env):
         """
         reset time
         """
+        return [x for x in self._all_dates if x.hour == 9 and x.minute < 1][1:]
 
     @property
     def current_portfolio_weights(self) -> dict[str, float]:
@@ -121,10 +141,6 @@ class BaseTradingEnv(gym.Env):
     def _get_state_dim(self) -> tuple[int]:
         return self._get_state().shape
 
-    def _get_next_date(self) -> pd.Timestamp:
-        pos = self.historical_prices.index.get_loc(self.current_datetime)
-        return self.historical_prices.index[pos + 1]
-
     def _get_random_start_date(self) -> pd.Timestamp:
         if self.episode_length_days >= len(self._eligible_start_times):
             return self._eligible_start_times[0]
@@ -143,6 +159,7 @@ class BaseTradingEnv(gym.Env):
             self.current_datetime = deepcopy(self.initial_datetime)
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
+        self.current_idx = self._all_dates.index(self.current_datetime)
 
         return self._get_state(), {
             "datetime": self.current_datetime,
