@@ -167,8 +167,6 @@ class BaseTradingEnv(gym.Env, ABC):
 
         return self._get_state(), {
             "datetime": self.current_datetime,
-            "portfolio": self.current_portfolio,
-            "portfolio_value": self.current_portfolio_value,
         }
 
     def render(self, render_mode: str = None):

@@ -48,8 +48,6 @@ class FxTradingEnv(BaseTradingEnv):
             episode_length_days=int(episode_length_days),
         )
 
-        self.preprocess_data()
-
     def preprocess_data(self) -> None:
         """
         1. Set action space
@@ -122,10 +120,11 @@ class FxTradingEnv(BaseTradingEnv):
         if old_portfolio_value <= 1e-2:
             return self._get_state(), 0.0, True, False, {}
 
-        action *= self.trading_params["max_delta_in_weights"]
         combined_actions = list(zip(action, self.existing_tickers))
 
         current_market = self.market_on_date
+
+        
 
         for single_action, currency_pair in combined_actions:
 
