@@ -13,9 +13,9 @@ The goal is to train an agent to trade multiple currency pairs by modeling flows
 - Long‑only positions (extendable to shorting)
 - Realistic price data (1‑minute FX bars)
 
-The observation space consists of current portfolio weights (for all currencies) and a set of technical indicators. Actions are continuous and are computed for each tradable currency pair to avoid creating synthetic rates.
+The observation space consists of current portfolio weights (for all currencies) and a set of technical indicators. 
 
-We decided not to optimize portfolio weights directly. For a portfolio containing multiple currencies, e.g., {USD, EUR, JPY}, an agent can purchase JPY using both USD and EUR simultaneously - a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades.
+It was decided not to optimize portfolio weights directly. For a portfolio containing multiple currencies, e.g., {USD, EUR, JPY}, an agent can purchase JPY using both USD and EUR simultaneously - a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades. Therefore, actions are continuous and are computed for each tradable currency pair to avoid creating synthetic rates.
 
 ---
 
