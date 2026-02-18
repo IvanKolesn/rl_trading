@@ -4,8 +4,6 @@ This project implements a custom [Gymnasium](https://gymnasium.farama.org/) envi
 
 It was decided not to use [FinRL](https://github.com/AI4Finance-Foundation/FinRL) and [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster) to build the environment and model from scratch.
 
-It was decided not to use [FinRL](https://github.com/AI4Finance-Foundation/FinRL) and [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster) to build the environment and model from scratch.
-
 ---
 
 ## Overview
