@@ -20,29 +20,41 @@ class FXModel(TorchModelV2, nn.Module):
         )
         nn.Module.__init__(self)
         obs_dim = obs_space.shape[0]
+        action_dim = action_space.shape[0]
 
         self.main_net = nn.Sequential(
             nn.Linear(obs_dim, 256),
             nn.LayerNorm(256),
             nn.GELU(),
+            nn.Dropout(0.2),
             nn.Linear(256, 128),
             nn.LayerNorm(128),
             nn.GELU(),
+            nn.Dropout(0.2),
             nn.Linear(128, 64),
             nn.LayerNorm(64),
             nn.GELU(),
+            nn.Dropout(0.2),
         )
 
-        self.action_net = nn.Sequential(nn.Linear(64, num_outputs), nn.Tanh())
+        self.mean_net = nn.Sequential(nn.Linear(64, action_dim), nn.Tanh())
+        self.log_std_net = nn.Sequential(nn.Linear(64, action_dim))
 
         self.value_net = nn.Sequential(nn.Linear(64, 32), nn.GELU(), nn.Linear(32, 1))
 
         self._value = None
 
     def forward(self, input_dict, state, seq_lens):
+        """
+        Forward pass
+        """
         x = self.main_net(input_dict["obs"].float())
         self._value = self.value_net(x)
-        actions = self.action_net(x)
+
+        mean = self.mean_net(x)
+        log_std = self.log_std_net(x)
+        actions = torch.cat([mean, log_std], dim=-1)
+
         return actions, state
 
     def value_function(self):

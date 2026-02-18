@@ -116,13 +116,13 @@ class FxTradingEnv(BaseTradingEnv):
 
         current_market = self.market_on_date
 
-        max_w = self.trading_params["max_delta_in_weights"]
+        action_penalty = self.trading_params["action_penalty"]
 
-        trade_fee = self.trading_params["trade_fee"]
         slippage_mu, slippage_sigma = self.trading_params["slippage"]
+
         cost = (
             1
-            - trade_fee
+            - self.trading_params["trade_fee"]
             - abs(
                 np.random.normal(
                     loc=slippage_mu, scale=slippage_sigma, size=len(action)
@@ -130,6 +130,8 @@ class FxTradingEnv(BaseTradingEnv):
             )
         )
         cost = np.maximum(cost, 0)
+
+        action = action * self.trading_params["max_delta_in_weights"]
 
         for i, (single_action, currency_pair) in enumerate(
             zip(action, self.existing_tickers)
@@ -142,7 +144,7 @@ class FxTradingEnv(BaseTradingEnv):
 
             trade_amount = min(
                 old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action) * max_w,
+                old_portfolio[fx_from] * abs(single_action),
             )
 
             target_portfolio[fx_from] -= trade_amount
@@ -153,8 +155,11 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_idx += 1
         self.current_datetime = self._all_dates[self.current_idx]
 
-        # in basis points if multiplied by 10000
-        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 10_000
+        # reward is in basis points if multiplied by 10000
+        # penalty for large trades is also added
+        reward = np.log(
+            self.current_portfolio_value / old_portfolio_value
+        ) * 10_000 - action_penalty * sum(action**2)
 
         terminated = self.current_datetime == self._last_date
         truncated = (

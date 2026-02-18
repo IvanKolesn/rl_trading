@@ -20,6 +20,7 @@ DEFAULT_TRADING_PARAMS = {
     "long_only": True,  # todo: add shorting later
     "base_currency": "USD",  # all ccy must be in the upper case
     "max_delta_in_weights": 0.25,
+    "action_penalty": 0.5,
 }
 
 
