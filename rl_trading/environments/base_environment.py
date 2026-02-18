@@ -29,8 +29,9 @@ class BaseTradingEnv(gym.Env, ABC):
 
     def __init__(
         self,
-        historical_prices: pd.DataFrame,
-        features_dataset: pd.DataFrame,
+        historical_prices: dict[pd.Timestamp, dict[str, float]],
+        features_dataset: dict[pd.Timestamp, list],
+        ticker_set: tuple[str],
         initial_portfolio: dict[str, float],
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
@@ -47,10 +48,11 @@ class BaseTradingEnv(gym.Env, ABC):
 
         self.initial_portfolio = deepcopy(initial_portfolio)
         self.current_portfolio = deepcopy(initial_portfolio)
-        self.historical_prices = historical_prices.to_dict(orient="index")
-        self.features_dataset = features_dataset.to_dict(orient="index")
+        self.historical_prices = historical_prices
+        self.features_dataset = features_dataset
         self.trading_params = trading_params
         self.episode_length_days = int(episode_length_days)
+        self.existing_tickers = ticker_set
 
         self._all_dates = list(self.historical_prices.keys())
         self._last_date = max(self._all_dates)
@@ -66,21 +68,18 @@ class BaseTradingEnv(gym.Env, ABC):
         self.initial_datetime = deepcopy(self.current_datetime)
         self.initial_portfolio_value = None
 
-    def preprocess_data(self) -> None:
-        """
-        validate inputs
-        """
-
-        ticker_set = {ccy for x in self.historical_prices.values() for ccy in x.keys()}
-        self.existing_tickers = sorted(ticker_set)
-
-        # we will scale at step
         self.action_space = gym.spaces.Box(
             low=-1.0,
             high=1.0,
             shape=(len(self.existing_tickers),),
             dtype=np.float32,
         )
+
+    @abstractmethod
+    def preprocess_data(self) -> None:
+        """
+        validate inputs
+        """
 
     def _validate_inputs(self) -> None:
         """

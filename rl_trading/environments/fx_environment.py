@@ -17,9 +17,6 @@ from rl_trading.environments.base_environment import (
     BaseTradingEnv,
     DEFAULT_TRADING_PARAMS,
 )
-from rl_trading.environments.data_processing import (
-    create_reverse_fx_tickers,
-)
 
 
 class FxTradingEnv(BaseTradingEnv):
@@ -29,8 +26,9 @@ class FxTradingEnv(BaseTradingEnv):
 
     def __init__(
         self,
-        historical_prices: pd.DataFrame,
-        features_dataset: pd.DataFrame,
+        historical_prices: dict[pd.Timestamp, dict[str, float]],
+        features_dataset: dict[pd.Timestamp, list],
+        ticker_set: tuple[str],
         initial_portfolio: dict[str, float],
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
@@ -44,6 +42,7 @@ class FxTradingEnv(BaseTradingEnv):
             features_dataset=features_dataset,
             initial_portfolio=initial_portfolio,
             trading_params=trading_params,
+            ticker_set=ticker_set,
             start_datetime=start_datetime,
             episode_length_days=int(episode_length_days),
         )
@@ -55,14 +54,7 @@ class FxTradingEnv(BaseTradingEnv):
         3. Create reverse tickers
         4. Set observation space
         """
-        super().preprocess_data()
         self._validate_inputs()
-
-        # todo: re-write create_reverse_fx_tickers for dict
-        self.historical_prices = create_reverse_fx_tickers(
-            pd.DataFrame.from_dict(self.historical_prices, orient="index")
-        )
-        self.historical_prices = self.historical_prices.to_dict(orient="index")
 
         self.initial_portfolio_value = self.current_portfolio_value
 
@@ -124,7 +116,9 @@ class FxTradingEnv(BaseTradingEnv):
 
         current_market = self.market_on_date
 
-        
+        max_w = self.trading_params["max_delta_in_weights"]
+        trade_fee = self.trading_params["trade_fee"]
+        slippage_mu, slippage_sigma = self.trading_params["slippage"]
 
         for single_action, currency_pair in combined_actions:
 
@@ -135,20 +129,18 @@ class FxTradingEnv(BaseTradingEnv):
 
             trade_amount = min(
                 old_portfolio[fx_from],
-                old_portfolio[fx_from]
-                * abs(single_action)
-                * self.trading_params["max_delta_in_weights"],
+                old_portfolio[fx_from] * abs(single_action) * max_w,
             )
 
             self.current_portfolio[fx_from] -= trade_amount
 
             cost = (
                 1
-                - self.trading_params["trade_fee"]
+                - trade_fee
                 - abs(
                     np.random.normal(
-                        loc=self.trading_params["slippage"][0],
-                        scale=self.trading_params["slippage"][1],
+                        loc=slippage_mu,
+                        scale=slippage_sigma,
                     )
                 )
             )
@@ -182,8 +174,6 @@ class FxTradingEnv(BaseTradingEnv):
         current_weights = self.current_portfolio_weights
         current_weights = np.array([current_weights[x] for x in self.all_currencies])
 
-        all_indicators = np.fromiter(
-            self.features_dataset[self.current_datetime].values(), dtype=np.float32
-        )
+        all_indicators = np.array(self.features_dataset[self.current_datetime])
 
         return np.concatenate([current_weights, np.array(all_indicators)])
