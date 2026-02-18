@@ -136,7 +136,9 @@ class FxTradingEnv(BaseTradingEnv):
 
             trade_amount = min(
                 old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action),
+                old_portfolio[fx_from]
+                * abs(single_action)
+                * self.trading_params["max_delta_in_weights"],
             )
 
             self.current_portfolio[fx_from] -= trade_amount

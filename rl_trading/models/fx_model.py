@@ -33,10 +33,7 @@ class FXModel(TorchModelV2, nn.Module):
             nn.GELU(),
         )
 
-        self.action_net = nn.Sequential(
-            nn.Linear(64, num_outputs),
-            nn.Tanh()
-        )
+        self.action_net = nn.Sequential(nn.Linear(64, num_outputs), nn.Tanh())
 
         self.value_net = nn.Sequential(nn.Linear(64, 32), nn.GELU(), nn.Linear(32, 1))
 
