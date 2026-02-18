@@ -10,6 +10,7 @@ from random import choice
 import gymnasium as gym
 import pandas as pd
 import numpy as np
+import ray
 
 from gymnasium.core import ActType, ObsType
 
@@ -29,8 +30,8 @@ class BaseTradingEnv(gym.Env, ABC):
 
     def __init__(
         self,
-        historical_prices: dict[pd.Timestamp, dict[str, float]],
-        features_dataset: dict[pd.Timestamp, list],
+        historical_prices: dict[str, dict[str, float]] | ray.ObjectRef,
+        features_dataset: dict[str, list] | ray.ObjectRef,
         ticker_set: tuple[str],
         initial_portfolio: dict[str, float],
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
@@ -48,13 +49,24 @@ class BaseTradingEnv(gym.Env, ABC):
 
         self.initial_portfolio = deepcopy(initial_portfolio)
         self.current_portfolio = deepcopy(initial_portfolio)
-        self.historical_prices = historical_prices
-        self.features_dataset = features_dataset
+
+        if isinstance(historical_prices, ray.ObjectRef):
+            self.historical_prices = ray.get(historical_prices)
+        else:
+            self.historical_prices = historical_prices
+
+        if isinstance(features_dataset, ray.ObjectRef):
+            self.features_dataset = ray.get(features_dataset)
+        else:
+            self.features_dataset = features_dataset
+
         self.trading_params = trading_params
         self.episode_length_days = int(episode_length_days)
         self.existing_tickers = ticker_set
 
-        self._all_dates = list(self.historical_prices.keys())
+        self._all_dates = pd.to_datetime(
+            list(self.historical_prices.keys()), format="%Y-%m-%d %H:%M:%S"
+        ).to_list()
         self._last_date = max(self._all_dates)
 
         if start_datetime is not None:
@@ -86,7 +98,7 @@ class BaseTradingEnv(gym.Env, ABC):
         Check validity of price history and current portfolio
         """
 
-        if self.current_datetime not in self.historical_prices:
+        if str(self.current_datetime) not in self.historical_prices:
             raise KeyError(f"{self.current_datetime} is missing in data")
 
     @abstractmethod
@@ -102,7 +114,7 @@ class BaseTradingEnv(gym.Env, ABC):
         """
         Get current market snapshot
         """
-        return self.historical_prices[self.current_datetime]
+        return self.historical_prices[str(self.current_datetime)]
 
     @property
     def current_portfolio_value(self) -> float:

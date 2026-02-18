@@ -10,6 +10,7 @@ from typing import Union
 import pandas as pd
 import numpy as np
 import gymnasium as gym
+import ray
 
 from gymnasium.core import ActType, ObsType
 
@@ -26,8 +27,8 @@ class FxTradingEnv(BaseTradingEnv):
 
     def __init__(
         self,
-        historical_prices: dict[pd.Timestamp, dict[str, float]],
-        features_dataset: dict[pd.Timestamp, list],
+        historical_prices: dict[str, dict[str, float]] | ray.ObjectRef,
+        features_dataset: dict[str, list] | ray.ObjectRef,
         ticker_set: tuple[str],
         initial_portfolio: dict[str, float],
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
@@ -106,21 +107,33 @@ class FxTradingEnv(BaseTradingEnv):
         3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
         """
 
-        old_portfolio = self.current_portfolio.copy()
+        target_portfolio = self.current_portfolio
+        old_portfolio = target_portfolio.copy()
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
             return self._get_state(), 0.0, True, False, {}
 
-        combined_actions = list(zip(action, self.existing_tickers))
-
         current_market = self.market_on_date
 
         max_w = self.trading_params["max_delta_in_weights"]
+
         trade_fee = self.trading_params["trade_fee"]
         slippage_mu, slippage_sigma = self.trading_params["slippage"]
+        cost = (
+            1
+            - trade_fee
+            - abs(
+                np.random.normal(
+                    loc=slippage_mu, scale=slippage_sigma, size=len(action)
+                )
+            )
+        )
+        cost = np.maximum(cost, 0)
 
-        for single_action, currency_pair in combined_actions:
+        for i, (single_action, currency_pair) in enumerate(
+            zip(action, self.existing_tickers)
+        ):
 
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
@@ -132,21 +145,9 @@ class FxTradingEnv(BaseTradingEnv):
                 old_portfolio[fx_from] * abs(single_action) * max_w,
             )
 
-            self.current_portfolio[fx_from] -= trade_amount
-
-            cost = (
-                1
-                - trade_fee
-                - abs(
-                    np.random.normal(
-                        loc=slippage_mu,
-                        scale=slippage_sigma,
-                    )
-                )
-            )
-
-            self.current_portfolio[fx_to] += (
-                trade_amount * current_market[fx_from + fx_to] * max(cost, 0)
+            target_portfolio[fx_from] -= trade_amount
+            target_portfolio[fx_to] += (
+                trade_amount * current_market[fx_from + fx_to] * cost[i]
             )
 
         self.current_idx += 1
@@ -161,8 +162,8 @@ class FxTradingEnv(BaseTradingEnv):
         ).days >= self.episode_length_days
 
         info = {
-            "datetime": self.current_datetime,
-            "portfolio": self.current_portfolio,
+            "datetime": str(self.current_datetime),
+            "portfolio": target_portfolio.copy(),
         }
 
         return self._get_state(), reward, terminated, truncated, info
@@ -174,6 +175,6 @@ class FxTradingEnv(BaseTradingEnv):
         current_weights = self.current_portfolio_weights
         current_weights = np.array([current_weights[x] for x in self.all_currencies])
 
-        all_indicators = np.array(self.features_dataset[self.current_datetime])
+        all_indicators = np.array(self.features_dataset[str(self.current_datetime)])
 
         return np.concatenate([current_weights, np.array(all_indicators)])
