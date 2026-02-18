@@ -6,7 +6,6 @@ import random
 
 from copy import deepcopy
 from typing import Union
-from functools import cached_property
 
 import pandas as pd
 import numpy as np
@@ -48,6 +47,8 @@ class FxTradingEnv(BaseTradingEnv):
             start_datetime=start_datetime,
             episode_length_days=int(episode_length_days),
         )
+
+        self.preprocess_data()
 
     def preprocess_data(self) -> None:
         """
@@ -110,19 +111,21 @@ class FxTradingEnv(BaseTradingEnv):
         Action:
 
         1. Do trades as flows: from -100% to 100% for one currency pair
+        2. Cap them at max_delta_in_weights
         2. Compute new portfolio
         3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
         """
+
+        old_portfolio = self.current_portfolio.copy()
         old_portfolio_value = self.current_portfolio_value
 
-        # Bankrupt
-        if old_portfolio_value < 1e-5:
-            return self._get_state(), 0, True, False, {}
+        if old_portfolio_value <= 1e-2:
+            return self._get_state(), 0.0, True, False, {}
+
+        action *= self.trading_params["max_delta_in_weights"]
+        combined_actions = list(zip(action, self.existing_tickers))
 
         current_market = self.market_on_date
-
-        combined_actions = list(zip(action, self.existing_tickers))
-        # random.shuffle(combined_actions)
 
         for single_action, currency_pair in combined_actions:
 
@@ -132,24 +135,25 @@ class FxTradingEnv(BaseTradingEnv):
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
 
             trade_amount = min(
-                self.current_portfolio[fx_from],
-                self.current_portfolio[fx_from] * abs(single_action),
+                old_portfolio[fx_from],
+                old_portfolio[fx_from] * abs(single_action),
             )
 
             self.current_portfolio[fx_from] -= trade_amount
-            self.current_portfolio[fx_to] += (
-                trade_amount
-                * current_market[fx_from + fx_to]
-                * (
-                    1
-                    - self.trading_params["trade_fee"]
-                    - abs(
-                        np.random.normal(
-                            loc=self.trading_params["slippage"][0],
-                            scale=self.trading_params["slippage"][1],
-                        )
+
+            cost = (
+                1
+                - self.trading_params["trade_fee"]
+                - abs(
+                    np.random.normal(
+                        loc=self.trading_params["slippage"][0],
+                        scale=self.trading_params["slippage"][1],
                     )
                 )
+            )
+
+            self.current_portfolio[fx_to] += (
+                trade_amount * current_market[fx_from + fx_to] * max(cost, 0)
             )
 
         self.current_idx += 1

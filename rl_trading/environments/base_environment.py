@@ -7,9 +7,6 @@ from typing import Union
 from copy import deepcopy
 from random import choice
 
-from functools import lru_cache
-from functools import cached_property
-
 import gymnasium as gym
 import pandas as pd
 import numpy as np
@@ -20,7 +17,7 @@ DEFAULT_TRADING_PARAMS = {
     "trade_fee": 0.0001,  # 1 bp
     "slippage": (0.0001, 0.0002),  # abs( N(0.0001, 0.0002) )
     "long_only": True,  # todo: add shorting later
-    "base_currency": "usd",
+    "base_currency": "USD",  # all ccy must be in the upper case
     "max_delta_in_weights": 0.25,
 }
 
@@ -77,9 +74,10 @@ class BaseTradingEnv(gym.Env, ABC):
         ticker_set = {ccy for x in self.historical_prices.values() for ccy in x.keys()}
         self.existing_tickers = sorted(ticker_set)
 
+        # we will scale at step
         self.action_space = gym.spaces.Box(
-            low=-self.trading_params["max_delta_in_weights"],
-            high=self.trading_params["max_delta_in_weights"],
+            low=-1.0,
+            high=1.0,
             shape=(len(self.existing_tickers),),
             dtype=np.float32,
         )
@@ -170,7 +168,7 @@ class BaseTradingEnv(gym.Env, ABC):
         return self._get_state(), {
             "datetime": self.current_datetime,
             "portfolio": self.current_portfolio,
-            "portfolio_yalue": self.current_portfolio_value,
+            "portfolio_value": self.current_portfolio_value,
         }
 
     def render(self, render_mode: str = None):
