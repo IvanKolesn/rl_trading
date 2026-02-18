@@ -154,7 +154,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_datetime = self._all_dates[self.current_idx]
 
         # in basis points if multiplied by 10000
-        reward = np.log(self.current_portfolio_value / old_portfolio_value)  # * 10_000
+        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 10_000
 
         terminated = self.current_datetime == self._last_date
         truncated = (
