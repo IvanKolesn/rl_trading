@@ -1,6 +1,8 @@
 # RL Trading: Reinforcement Learning for FX Trading
 
-This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for an foreign exchange (FX) trading (high-, mid-, low-frequency). It includes data preprocessing, feature preparation, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
+This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for foreign exchange (FX) trading (high-, mid-, low-frequency). It includes data preprocessing, feature preparation, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
+
+It was decided not to use [FinRL](https://github.com/AI4Finance-Foundation/FinRL) and [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster) to build the environment and model from scratch.
 
 It was decided not to use [FinRL](https://github.com/AI4Finance-Foundation/FinRL) and [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster) to build the environment and model from scratch.
 
@@ -15,20 +17,20 @@ The goal is to train an agent to trade multiple currency pairs by modeling flows
 - Long‑only positions (extendable to shorting)
 - Realistic price data (1‑minute FX bars)
 
-The observation space consists of current portfolio weights (for all currencies) and a set of technical indicators. Actions are continuous and are computed for each currency pair.
+The observation space consists of current portfolio weights (for all currencies) and a set of technical indicators. 
 
-We decided not to optimize portfolio weights directly. For a portfolio containing multiple currencies, e.g., {USD, EUR, JPY}, an agent can purchase JPY using both USD and EUR simultaneously - a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades.
+It was decided **not** to optimize portfolio weights directly. For a portfolio containing multiple currencies, e.g., `{USD, EUR, JPY}`, an agent can purchase JPY using both USD and EUR simultaneously – a capability that direct weight optimization would miss. Modeling flows per currency pair implicitly allows such multi‑source trades. Therefore, actions are continuous and are computed for each tradable currency pair to avoid creating synthetic rates.
 
 ---
 
 ## Installation
 
-All nessesary info and dependencies are listed in `pyproject.toml`
+All necessary info and dependencies are listed in `pyproject.toml`.
 
 Install the package locally:
 
-1. Clone the repository or load it as zip
-2. Install it using `pip install`
+1. Clone the repository or download it as a zip.
+2. Install it using `pip install .` (inside the project root).
 
 ---
 
@@ -53,7 +55,7 @@ The core environment is `FxTradingEnv` in `rl_trading/environments/fx_environmen
 #### Action Space
 - **Type**: `Box` (continuous)
 - **Shape**: `(n_pairs,)` where `n_pairs` is the number of currency pairs (e.g., `"eurusd"`, `"usdjpy"`, …).
-- **Range**: `[-max_delta, max_delta]` with `max_delta = 0.25` (default).
+- **Range**: `[-1.0, 1.0]` (interpreted as a fraction of the available source currency, after scaling by `max_delta_in_weights` inside the environment).
 
 #### Interpretation of an Action
 For a given currency pair `XXXYYY` (e.g., `"eurusd"`):
@@ -61,6 +63,8 @@ For a given currency pair `XXXYYY` (e.g., `"eurusd"`):
   `from_currency = YYY`, `to_currency = XXX`.
 - **Negative action** → sell the **base** currency (`XXX`) for the **quote** currency (`YYY`).  
   `from_currency = XXX`, `to_currency = YYY`.
+
+Inside `step()`, the raw action (in `[-1, 1]`) is first multiplied by `max_delta_in_weights` (default `0.25`). This scaled value is then used to determine the trade amount as a fraction of the source currency’s holdings.
 
 #### Usage Example:
 ```python
@@ -71,12 +75,13 @@ from rl_trading.environments.fx_environment import FxTradingEnv
 historical_prices = pd.read_parquet("data/historical_prices.parquet")
 features = pd.read_parquet("data/features.parquet")
 
-initial_portfolio = {"usd": 100_000}
+initial_portfolio = {"USD": 100_000}
 trading_params = {
     "trade_fee": 0.0001,          # 1 bp
     "slippage": (0.0001, 0.0002), # mean, std of absolute slippage
-    "base_currency": "usd",
+    "base_currency": "USD",
     "max_delta_in_weights": 0.25,
+    "action_penalty": 0.5,         # penalty coefficient for large actions (see Reward)
 }
 
 env = FxTradingEnv(
@@ -90,7 +95,7 @@ env = FxTradingEnv(
 env.preprocess_data()
 
 obs, info = env.reset()
-action = env.action_space.sample()   # random action
+action = env.action_space.sample()   # random action in [-1, 1]
 obs, reward, terminated, truncated, info = env.step(action)
 ```
 
@@ -99,12 +104,12 @@ obs, reward, terminated, truncated, info = env.step(action)
 The notebook `notebooks/train_ppo.ipynb` demonstrates creating the environment and training a PPO agent using Ray RLlib.
 
 Key steps:
-- Scale features using `RobustScaler`.
+- Scale features using `StandardScaler` (or `RobustScaler` as preferred).
 - Register the environment and a custom model (`FXModel` in `rl_trading/models/fx_model.py`).
 - Configure PPO with appropriate hyperparameters.
 - Train and monitor rewards.
 
-The model is trained with the total P&L (log return in basis points) as the reward function.
+The model is trained with the total P&L (log return in basis points) plus a quadratic action penalty as the reward function.
 
 ---
 
@@ -112,13 +117,13 @@ The model is trained with the total P&L (log return in basis points) as the rewa
 
 Let:
 - `holdings[from]` = current amount of the source currency.
-- `action` = the scalar action for this pair.
+- `scaled_action` = raw action (in `[-1, 1]`) multiplied by `max_delta_in_weights`.
 
 The amount to trade is:
 ```math
-\text{trade\_amount} = \min\Big(\text{holdings[from]},\; \text{holdings[from]} \times |\text{action}|\Big)
+\text{trade\_amount} = \min\Big(\text{holdings[from]},\; \text{holdings[from]} \times |\text{scaled\_action}|\Big)
 ```
-This caps the trade at the available balance and interprets `|action|` as a fraction of the current holdings in the source currency.
+This caps the trade at the available balance and interprets `|scaled_action|` as a fraction of the current holdings in the source currency.
 
 The received amount in the destination currency is:
 ```math
@@ -134,11 +139,12 @@ where:
   with default `μ = 0.0001`, `σ = 0.0002`. The absolute value ensures slippage always reduces the received amount (negative impact).
 
 ### Reward
-The reward after each step is the logarithmic return expressed in basis points:
+The reward after each step is the logarithmic return expressed in basis points, minus a quadratic penalty to discourage large trades:
 ```math
-r_t = \ln\left(\frac{V_t}{V_{t-1}}\right) \times 10\,000
+r_t = \ln\left(\frac{V_t}{V_{t-1}}\right) \times 10\,000 \;-\; \text{action\_penalty} \times \sum_i (\text{scaled\_action}_i)^2
 ```
-where `V_t` is the total portfolio value in the base currency.
+where `V_t` is the total portfolio value in the base currency.  
+The quadratic term penalizes the sum of squares of the **scaled actions**, promoting smoother position changes. The coefficient `action_penalty` can be tuned (default `0.5`).
 
 ---
 
@@ -162,7 +168,7 @@ Technical indicators are computed per currency pair using `pandas_ta` in `tech_i
 - **Prev high / low** – previous period’s high and low.
 - **Close vs prev high/low** – relative differences.
 
-All features are scaled using `RobustScaler` (trained on pre‑2023 data) before being fed to the agent.
+All features are scaled using `StandardScaler` (trained on pre‑2023 data) before being fed to the agent.
 
 ---
 

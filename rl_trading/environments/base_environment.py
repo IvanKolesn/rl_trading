@@ -2,16 +2,15 @@
 Basic trading environment
 """
 
+from abc import ABC, abstractmethod
 from typing import Union
 from copy import deepcopy
 from random import choice
 
-from functools import lru_cache
-from functools import cached_property
-
 import gymnasium as gym
 import pandas as pd
 import numpy as np
+import ray
 
 from gymnasium.core import ActType, ObsType
 
@@ -19,20 +18,22 @@ DEFAULT_TRADING_PARAMS = {
     "trade_fee": 0.0001,  # 1 bp
     "slippage": (0.0001, 0.0002),  # abs( N(0.0001, 0.0002) )
     "long_only": True,  # todo: add shorting later
-    "base_currency": "usd",
+    "base_currency": "USD",  # all ccy must be in the upper case
     "max_delta_in_weights": 0.25,
+    "action_penalty": 0.5,
 }
 
 
-class BaseTradingEnv(gym.Env):
+class BaseTradingEnv(gym.Env, ABC):
     """
     Gymnasium for trading
     """
 
     def __init__(
         self,
-        historical_prices: pd.DataFrame,
-        features_dataset: pd.DataFrame,
+        historical_prices: dict[str, dict[str, float]] | ray.ObjectRef,
+        features_dataset: dict[str, list] | ray.ObjectRef,
+        ticker_set: tuple[str],
         initial_portfolio: dict[str, float],
         trading_params: dict[str, Union[float, str, bool]] = DEFAULT_TRADING_PARAMS,
         start_datetime: pd.Timestamp = None,
@@ -43,16 +44,30 @@ class BaseTradingEnv(gym.Env):
         Gymnasium for trading
         """
 
+        super().__init__()
+
         np.random.seed(seed)
 
         self.initial_portfolio = deepcopy(initial_portfolio)
         self.current_portfolio = deepcopy(initial_portfolio)
-        self.historical_prices = historical_prices.to_dict(orient="index")
-        self.features_dataset = features_dataset.to_dict(orient="index")
+
+        if isinstance(historical_prices, ray.ObjectRef):
+            self.historical_prices = ray.get(historical_prices)
+        else:
+            self.historical_prices = historical_prices
+
+        if isinstance(features_dataset, ray.ObjectRef):
+            self.features_dataset = ray.get(features_dataset)
+        else:
+            self.features_dataset = features_dataset
+
         self.trading_params = trading_params
         self.episode_length_days = int(episode_length_days)
+        self.existing_tickers = ticker_set
 
-        self._all_dates = list(self.historical_prices.keys())
+        self._all_dates = pd.to_datetime(
+            list(self.historical_prices.keys()), format="%Y-%m-%d %H:%M:%S"
+        ).to_list()
         self._last_date = max(self._all_dates)
 
         if start_datetime is not None:
@@ -66,29 +81,28 @@ class BaseTradingEnv(gym.Env):
         self.initial_datetime = deepcopy(self.current_datetime)
         self.initial_portfolio_value = None
 
+        self.action_space = gym.spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(len(self.existing_tickers),),
+            dtype=np.float32,
+        )
+
+    @abstractmethod
     def preprocess_data(self) -> None:
         """
         validate inputs
         """
-
-        ticker_set = {ccy for x in self.historical_prices.values() for ccy in x.keys()}
-        self.existing_tickers = sorted(ticker_set)
-
-        self.action_space = gym.spaces.Box(
-            low=-self.trading_params["max_delta_in_weights"],
-            high=self.trading_params["max_delta_in_weights"],
-            shape=(len(self.existing_tickers),),
-            dtype=np.float32,
-        )
 
     def _validate_inputs(self) -> None:
         """
         Check validity of price history and current portfolio
         """
 
-        if self.current_datetime not in self.historical_prices:
+        if str(self.current_datetime) not in self.historical_prices:
             raise KeyError(f"{self.current_datetime} is missing in data")
 
+    @abstractmethod
     def _convert_portfolio_to_base_ccy(self) -> dict[str, float]:
         """
         converts portfolio to base currency
@@ -101,7 +115,7 @@ class BaseTradingEnv(gym.Env):
         """
         Get current market snapshot
         """
-        return self.historical_prices[self.current_datetime]
+        return self.historical_prices[str(self.current_datetime)]
 
     @property
     def current_portfolio_value(self) -> float:
@@ -128,11 +142,13 @@ class BaseTradingEnv(gym.Env):
             return {ccy: 0.0 for ccy in portfolio}
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
+    @abstractmethod
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
         Gym step
         """
 
+    @abstractmethod
     def _get_state(self) -> np.ndarray:
         """
         Current balance, current rates, returns, etc
@@ -146,7 +162,7 @@ class BaseTradingEnv(gym.Env):
             return self._eligible_start_times[0]
         return choice(self._eligible_start_times[: -self.episode_length_days])
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None) -> tuple:
         """
         Resets environment
         """
@@ -163,7 +179,6 @@ class BaseTradingEnv(gym.Env):
 
         return self._get_state(), {
             "datetime": self.current_datetime,
-            "portfolio": self.current_portfolio,
         }
 
     def render(self, render_mode: str = None):
