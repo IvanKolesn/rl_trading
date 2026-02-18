@@ -2,6 +2,7 @@
 Basic trading environment
 """
 
+from abc import ABC, abstractmethod
 from typing import Union
 from copy import deepcopy
 from random import choice
@@ -24,7 +25,7 @@ DEFAULT_TRADING_PARAMS = {
 }
 
 
-class BaseTradingEnv(gym.Env):
+class BaseTradingEnv(gym.Env, ABC):
     """
     Gymnasium for trading
     """
@@ -42,6 +43,8 @@ class BaseTradingEnv(gym.Env):
         """
         Gymnasium for trading
         """
+
+        super().__init__()
 
         np.random.seed(seed)
 
@@ -89,6 +92,7 @@ class BaseTradingEnv(gym.Env):
         if self.current_datetime not in self.historical_prices:
             raise KeyError(f"{self.current_datetime} is missing in data")
 
+    @abstractmethod
     def _convert_portfolio_to_base_ccy(self) -> dict[str, float]:
         """
         converts portfolio to base currency
@@ -128,11 +132,13 @@ class BaseTradingEnv(gym.Env):
             return {ccy: 0.0 for ccy in portfolio}
         return {ccy: value / total_value for ccy, value in portfolio.items()}
 
+    @abstractmethod
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
         Gym step
         """
 
+    @abstractmethod
     def _get_state(self) -> np.ndarray:
         """
         Current balance, current rates, returns, etc
@@ -146,7 +152,7 @@ class BaseTradingEnv(gym.Env):
             return self._eligible_start_times[0]
         return choice(self._eligible_start_times[: -self.episode_length_days])
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None) -> tuple:
         """
         Resets environment
         """
@@ -164,6 +170,7 @@ class BaseTradingEnv(gym.Env):
         return self._get_state(), {
             "datetime": self.current_datetime,
             "portfolio": self.current_portfolio,
+            "portfolio_yalue": self.current_portfolio_value,
         }
 
     def render(self, render_mode: str = None):

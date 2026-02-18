@@ -23,11 +23,11 @@ class FXModel(TorchModelV2, nn.Module):
 
         self.main_net = nn.Sequential(
             nn.Linear(obs_dim, 256),
-            nn.GELU(),
             nn.LayerNorm(256),
-            nn.Linear(256, 128),
             nn.GELU(),
+            nn.Linear(256, 128),
             nn.LayerNorm(128),
+            nn.GELU(),
             nn.Linear(128, 64),
             nn.LayerNorm(64),
             nn.ReLU(),
@@ -35,14 +35,13 @@ class FXModel(TorchModelV2, nn.Module):
 
         self.action_net = nn.Sequential(
             nn.Linear(64, num_outputs),
-            nn.Tanh(),  # Actions in [-1, 1]
         )
 
         self.value_net = nn.Sequential(nn.Linear(64, 1))
         self._value = None
 
     def forward(self, input_dict, state, seq_lens):
-        x = self.main_net(input_dict["obs"])
+        x = self.main_net(input_dict["obs"].float())
         self._value = self.value_net(x)
         actions = self.action_net(x)
         return actions, state

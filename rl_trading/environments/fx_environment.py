@@ -51,9 +51,10 @@ class FxTradingEnv(BaseTradingEnv):
 
     def preprocess_data(self) -> None:
         """
+        1. Set action space
         1. Validate inputs
-        2. Create reverse tickers
-        3. Set action space and observation space
+        3. Create reverse tickers
+        4. Set observation space
         """
         super().preprocess_data()
         self._validate_inputs()
@@ -67,7 +68,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.initial_portfolio_value = self.current_portfolio_value
 
         self.observation_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf, shape=self._get_state_dim(), dtype=np.float32
+            low=-1_000, high=1_000, shape=self._get_state_dim(), dtype=np.float32
         )
 
     def _validate_inputs(self) -> None:
@@ -121,7 +122,7 @@ class FxTradingEnv(BaseTradingEnv):
         current_market = self.market_on_date
 
         combined_actions = list(zip(action, self.existing_tickers))
-        random.shuffle(combined_actions)
+        # random.shuffle(combined_actions)
 
         for single_action, currency_pair in combined_actions:
 
@@ -154,8 +155,8 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_idx += 1
         self.current_datetime = self._all_dates[self.current_idx]
 
-        # in basis points
-        reward = np.log(self.current_portfolio_value / old_portfolio_value) * 10_000
+        # in basis points if multiplied by 10000
+        reward = np.log(self.current_portfolio_value / old_portfolio_value)  # * 10_000
 
         terminated = self.current_datetime == self._last_date
         truncated = (
