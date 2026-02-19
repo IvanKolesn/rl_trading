@@ -109,9 +109,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.B = b_prev + eta * (current_return**2 - b_prev)
 
         # Differential Sharpe formula
-        denom = (b_prev - a_prev**2) ** 1.5
-        if denom < 1e-8:
-            return 0.0
+        denom = (b_prev - a_prev**2) ** 1.5 + 1e-8
 
         differential_sharpe = (
             b_prev * (current_return - a_prev)
@@ -174,14 +172,12 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_idx += 1
         self.current_datetime = self._all_dates[self.current_idx]
 
-        reward = np.log(self.current_portfolio_value) - np.log(old_portfolio_value)
+        reward = np.log(self.current_portfolio_value / old_portfolio_value)
 
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
-        else:
-            reward *= 10_000
 
-        reward -= action_penalty * sum(action**2)
+        reward = 10_000 * reward - action_penalty * sum(action**2)
 
         terminated = self.current_datetime == self._last_date
         truncated = (
