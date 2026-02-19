@@ -177,7 +177,7 @@ class FxTradingEnv(BaseTradingEnv):
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
 
-        reward = 10_000 * reward - action_penalty * sum(action**2)
+        reward = 100 * reward - action_penalty * sum(action**2)
 
         terminated = self.current_datetime == self._last_date
         truncated = (
