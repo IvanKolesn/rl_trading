@@ -21,7 +21,11 @@ DEFAULT_TRADING_PARAMS = {
     "base_currency": "USD",  # all ccy must be in the upper case
     "max_delta_in_weights": 0.25,
     "action_penalty": 0.5,
+    "reward": "total_profit",  # or diff_sharpe
+    "sharpe_eta": 0.1,
 }
+
+KNOWN_REWARDS = ("total_profit", "diff_sharpe")
 
 
 class BaseTradingEnv(gym.Env, ABC):
@@ -62,6 +66,10 @@ class BaseTradingEnv(gym.Env, ABC):
             self.features_dataset = features_dataset
 
         self.trading_params = trading_params
+
+        if self.trading_params["reward"] not in KNOWN_REWARDS:
+            raise KeyError(f"Unknown reward {self.trading_params["reward"]}")
+
         self.episode_length_days = int(episode_length_days)
         self.existing_tickers = ticker_set
 
@@ -87,6 +95,11 @@ class BaseTradingEnv(gym.Env, ABC):
             shape=(len(self.existing_tickers),),
             dtype=np.float32,
         )
+
+        if trading_params["reward"] == "diff_sharpe":
+            self.sharpe_eta = self.trading_params["sharpe_eta"]
+            self.A = 0.0  # MA of returns
+            self.B = 1e-6  # MA of squared returns
 
     @abstractmethod
     def preprocess_data(self) -> None:
@@ -176,6 +189,10 @@ class BaseTradingEnv(gym.Env, ABC):
 
         self.current_portfolio = deepcopy(self.initial_portfolio)
         self.current_idx = self._all_dates.index(self.current_datetime)
+
+        if self.trading_params["reward"] == "diff_sharpe":
+            self.A = 0.0  # MA of returns
+            self.B = 1e-6  # MA of squared returns
 
         return self._get_state(), {
             "datetime": self.current_datetime,
