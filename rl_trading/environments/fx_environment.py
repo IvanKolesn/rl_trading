@@ -2,8 +2,6 @@
 Gym environment for FX trading
 """
 
-import random
-
 from copy import deepcopy
 from typing import Union
 
@@ -11,7 +9,6 @@ import pandas as pd
 import numpy as np
 import gymnasium as gym
 import ray
-
 from gymnasium.core import ActType, ObsType
 
 from rl_trading.environments.base_environment import (
@@ -51,7 +48,7 @@ class FxTradingEnv(BaseTradingEnv):
     def preprocess_data(self) -> None:
         """
         1. Set action space
-        1. Validate inputs
+        2. Validate inputs
         3. Create reverse tickers
         4. Set observation space
         """
@@ -97,16 +94,36 @@ class FxTradingEnv(BaseTradingEnv):
 
         return portfolio_in_base_ccy
 
+    def _compute_differential_sharpe(self, current_return: float) -> float:
+        """
+        Compute the differential Sharpe ratio for a single return,
+        using the current moving averages A (mean) and B (second moment).
+        Updates A and B after computation.
+        """
+        eta = self.sharpe_eta
+        a_prev = self.A
+        b_prev = self.B
+
+        self.A = a_prev + eta * (current_return - a_prev)
+        self.B = b_prev + eta * (current_return**2 - b_prev)
+
+        variance = max(b_prev - a_prev**2, 0.0)
+        denom = variance**1.5 + 1e-8
+
+        differential_sharpe = (
+            b_prev * (current_return - a_prev)
+            - 0.5 * a_prev * (current_return**2 - b_prev)
+        ) / denom
+        return differential_sharpe
+
     def step(self, action: ActType) -> tuple[ObsType, float, bool, bool, dict]:
         """
         Action:
-
         1. Do trades as flows: from -100% to 100% for one currency pair
         2. Cap them at max_delta_in_weights
-        2. Compute new portfolio
-        3. Compute rewards (penalize model for trying to sell more than there is in portfolio)
+        3. Compute new portfolio
+        4. Compute rewards: differential Sharpe ratio + action penalty
         """
-
         target_portfolio = self.current_portfolio
         old_portfolio = target_portfolio.copy()
         old_portfolio_value = self.current_portfolio_value
@@ -115,11 +132,10 @@ class FxTradingEnv(BaseTradingEnv):
             return self._get_state(), 0.0, True, False, {}
 
         current_market = self.market_on_date
-
         action_penalty = self.trading_params["action_penalty"]
-
         slippage_mu, slippage_sigma = self.trading_params["slippage"]
 
+        # Slippage cost (multiplicative factor)
         cost = (
             1
             - self.trading_params["trade_fee"]
@@ -136,7 +152,6 @@ class FxTradingEnv(BaseTradingEnv):
         for i, (single_action, currency_pair) in enumerate(
             zip(action, self.existing_tickers)
         ):
-
             if single_action < 0:
                 fx_from, fx_to = currency_pair[:3], currency_pair[-3:]
             else:
@@ -155,11 +170,16 @@ class FxTradingEnv(BaseTradingEnv):
         self.current_idx += 1
         self.current_datetime = self._all_dates[self.current_idx]
 
-        # reward is in basis points if multiplied by 10000
-        # penalty for large trades is also added
-        reward = np.log(
-            self.current_portfolio_value / old_portfolio_value
-        ) * 10_000 - action_penalty * sum(action**2)
+        new_portfolio_value = self.current_portfolio_value
+        if new_portfolio_value <= 1e-2:
+            return self._get_state(), 0.0, True, False, {}
+
+        reward = np.log(self.current_portfolio_value / old_portfolio_value)
+
+        if self.trading_params["reward"] == "diff_sharpe":
+            reward = self._compute_differential_sharpe(reward)
+
+        reward = 100 * reward - action_penalty * sum(action**2)
 
         terminated = self.current_datetime == self._last_date
         truncated = (
