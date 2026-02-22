@@ -188,7 +188,7 @@ class FxTradingEnv(BaseTradingEnv):
 
         info = {
             "datetime": str(self.current_datetime),
-            "portfolio": target_portfolio.copy(),
+            "portfolio": self.current_portfolio_weights.copy(),
         }
 
         return self._get_state(), reward, terminated, truncated, info
