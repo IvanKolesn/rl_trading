@@ -104,12 +104,11 @@ class FxTradingEnv(BaseTradingEnv):
         a_prev = self.A
         b_prev = self.B
 
-        # Update moving averages
         self.A = a_prev + eta * (current_return - a_prev)
         self.B = b_prev + eta * (current_return**2 - b_prev)
 
-        # Differential Sharpe formula
-        denom = (b_prev - a_prev**2) ** 1.5 + 1e-8
+        variance = max(b_prev - a_prev**2, 0.0)
+        denom = variance**1.5 + 1e-8
 
         differential_sharpe = (
             b_prev * (current_return - a_prev)
@@ -130,7 +129,6 @@ class FxTradingEnv(BaseTradingEnv):
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
-            # Portfolio depleted – terminate episode
             return self._get_state(), 0.0, True, False, {}
 
         current_market = self.market_on_date
@@ -171,6 +169,10 @@ class FxTradingEnv(BaseTradingEnv):
 
         self.current_idx += 1
         self.current_datetime = self._all_dates[self.current_idx]
+
+        new_portfolio_value = self.current_portfolio_value
+        if new_portfolio_value <= 1e-2:
+            return self._get_state(), 0.0, True, False, {}
 
         reward = np.log(self.current_portfolio_value / old_portfolio_value)
 

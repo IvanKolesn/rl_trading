@@ -53,6 +53,7 @@ class FXModel(TorchModelV2, nn.Module):
 
         mean = self.mean_net(x)
         log_std = self.log_std_net(x)
+        log_std = torch.clamp(log_std, min=-3.0, max=1.0)
         actions = torch.cat([mean, log_std], dim=-1)
 
         return actions, state
