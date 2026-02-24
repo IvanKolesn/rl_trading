@@ -49,7 +49,7 @@ class BaseTradingEnv(gym.Env, ABC):
         Gymnasium for trading
         """
 
-        super().__init__(**kwargs)
+        super().__init__()
 
         np.random.seed(seed)
 
