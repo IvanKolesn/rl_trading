@@ -2,6 +2,8 @@
 Torch model for RayLib actions
 """
 
+import types
+
 import torch
 import torch.nn as nn
 
@@ -16,7 +18,12 @@ class FXModel(TorchModelV2, nn.Module):
     def __init__(self, obs_space, action_space, num_outputs, model_config, name):
 
         TorchModelV2.__init__(
-            self, obs_space, action_space, num_outputs, model_config, name
+            self,
+            obs_space,
+            action_space,
+            num_outputs,
+            model_config,
+            name,
         )
         nn.Module.__init__(self)
         obs_dim = obs_space.shape[0]
