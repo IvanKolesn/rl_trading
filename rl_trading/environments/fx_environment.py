@@ -148,7 +148,7 @@ class FxTradingEnv(BaseTradingEnv):
         )
         cost = np.maximum(cost, 0)
 
-        action = action * self.trading_params["max_delta_in_weights"]
+        max_delta = self.trading_params["max_delta_in_weights"]
 
         for i, (single_action, currency_pair) in enumerate(
             zip(action, self.existing_tickers)
@@ -160,7 +160,7 @@ class FxTradingEnv(BaseTradingEnv):
 
             trade_amount = min(
                 old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action),
+                old_portfolio[fx_from] * abs(single_action) * max_delta,
             )
 
             target_portfolio[fx_from] -= trade_amount
@@ -180,7 +180,9 @@ class FxTradingEnv(BaseTradingEnv):
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
 
-        reward = 100 * reward - self.trading_params["action_penalty"] * sum(action**2)
+        reward = 100 * reward - self.trading_params["action_penalty"] * np.mean(
+            action**2
+        )
 
         if all(np.abs(action) < 1e-4):
             reward -= self.trading_params["no_trade_penalty"]
