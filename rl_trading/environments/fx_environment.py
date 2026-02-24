@@ -184,9 +184,7 @@ class FxTradingEnv(BaseTradingEnv):
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
 
-        reward -= self.trading_params["action_penalty"] * np.mean(
-            action**2
-        )
+        reward -= self.trading_params["action_penalty"] * np.mean(action**2)
 
         if all(np.abs(action) < 1e-4):
             reward -= self.trading_params["no_trade_penalty"]
