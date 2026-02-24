@@ -59,7 +59,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.initial_portfolio_value = self.current_portfolio_value
 
         self.observation_space = gym.spaces.Box(
-            low=-1_000, high=1_000, shape=self._get_state_dim(), dtype=np.float32
+            low=-1e5, high=1e5, shape=self._get_state_dim(), dtype=np.float32
         )
 
     def _validate_inputs(self) -> None:
@@ -131,7 +131,11 @@ class FxTradingEnv(BaseTradingEnv):
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
-            return self._get_state(), 0.0, True, False, {}
+            info = {
+                "datetime": str(self.current_datetime),
+                "portfolio": self.current_portfolio_weights.copy(),
+            }
+            return self._get_state(), -1.0, True, False, info
 
         current_market = self.market_on_date
         slippage_mu, slippage_sigma = self.trading_params["slippage"]
@@ -180,7 +184,7 @@ class FxTradingEnv(BaseTradingEnv):
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
 
-        reward = 100 * reward - self.trading_params["action_penalty"] * np.mean(
+        reward -= self.trading_params["action_penalty"] * np.mean(
             action**2
         )
 
