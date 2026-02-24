@@ -16,6 +16,8 @@ from rl_trading.environments.base_environment import (
     DEFAULT_TRADING_PARAMS,
 )
 
+from rl_trading.features.utils import create_time_features
+
 
 class FxTradingEnv(BaseTradingEnv):
     """
@@ -57,7 +59,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.initial_portfolio_value = self.current_portfolio_value
 
         self.observation_space = gym.spaces.Box(
-            low=-1_000, high=1_000, shape=self._get_state_dim(), dtype=np.float32
+            low=-1e5, high=1e5, shape=self._get_state_dim(), dtype=np.float32
         )
 
     def _validate_inputs(self) -> None:
@@ -129,10 +131,13 @@ class FxTradingEnv(BaseTradingEnv):
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
-            return self._get_state(), 0.0, True, False, {}
+            info = {
+                "datetime": str(self.current_datetime),
+                "portfolio": self.current_portfolio_weights.copy(),
+            }
+            return self._get_state(), -1.0, True, False, info
 
         current_market = self.market_on_date
-        action_penalty = self.trading_params["action_penalty"]
         slippage_mu, slippage_sigma = self.trading_params["slippage"]
 
         # Slippage cost (multiplicative factor)
@@ -147,7 +152,7 @@ class FxTradingEnv(BaseTradingEnv):
         )
         cost = np.maximum(cost, 0)
 
-        action = action * self.trading_params["max_delta_in_weights"]
+        max_delta = self.trading_params["max_delta_in_weights"]
 
         for i, (single_action, currency_pair) in enumerate(
             zip(action, self.existing_tickers)
@@ -159,7 +164,7 @@ class FxTradingEnv(BaseTradingEnv):
 
             trade_amount = min(
                 old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action),
+                old_portfolio[fx_from] * abs(single_action) * max_delta,
             )
 
             target_portfolio[fx_from] -= trade_amount
@@ -179,7 +184,10 @@ class FxTradingEnv(BaseTradingEnv):
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
 
-        reward = 100 * reward - action_penalty * sum(action**2)
+        reward -= self.trading_params["action_penalty"] * np.mean(action**2)
+
+        if all(np.abs(action) < 1e-4):
+            reward -= self.trading_params["no_trade_penalty"]
 
         terminated = self.current_datetime == self._last_date
         truncated = (
@@ -188,7 +196,7 @@ class FxTradingEnv(BaseTradingEnv):
 
         info = {
             "datetime": str(self.current_datetime),
-            "portfolio": target_portfolio.copy(),
+            "portfolio": self.current_portfolio_weights.copy(),
         }
 
         return self._get_state(), reward, terminated, truncated, info
@@ -199,7 +207,6 @@ class FxTradingEnv(BaseTradingEnv):
         """
         current_weights = self.current_portfolio_weights
         current_weights = np.array([current_weights[x] for x in self.all_currencies])
-
         all_indicators = np.array(self.features_dataset[str(self.current_datetime)])
-
-        return np.concatenate([current_weights, np.array(all_indicators)])
+        time_features = create_time_features(self.current_datetime)
+        return np.concatenate([current_weights, all_indicators, time_features])

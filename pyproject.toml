@@ -19,7 +19,8 @@ dependencies = [
     "ray==2.52.1",
     "gymnasium>=1.2.2",
     "pandas-ta==0.4.71b0",
-    "gputil>=1.4.0"
+    "gputil>=1.4.0",
+    "dill>=0.3.8"
 ]
 
 [project.optional-dependencies]
