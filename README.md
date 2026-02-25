@@ -34,45 +34,6 @@ cd rl_trading
 pip install .
 ```
 
-We have updated the `README.md` file by removing the detailed PPO hyperparameters table from the **Training with PPO** section and deleting the mention of differential Sharpe ratio from the **Further Steps** list. The rest of the content remains unchanged.
-
-```markdown
-# RL Trading: Reinforcement Learning for FX Trading
-
-This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for foreign exchange (FX) trading (high‑, mid‑, low‑frequency). It includes data preprocessing, feature engineering, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
-
-The environment and model were built from scratch, without relying on existing frameworks like [FinRL](https://github.com/AI4Finance-Foundation/FinRL) or [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster).
-
----
-
-## Overview
-
-The goal is to train an agent to trade multiple currency pairs by modelling **flows** for each currency pair at every time step. The environment simulates realistic trading conditions including:
-
-- Transaction fees (1 bps by default)
-- Stochastic slippage
-- Long‑only positions (easily extendable to shorting)
-- Realistic 1‑minute FX bars
-
-The observation space consists of current portfolio weights (for all currencies) and a rich set of technical indicators.
-
-**Why flows instead of direct weight optimisation?**  
-For a portfolio containing multiple currencies, e.g. `{USD, EUR, JPY}`, an agent should be able to purchase JPY using both USD and EUR simultaneously – a capability that direct weight optimisation would miss. Modelling flows per currency pair implicitly allows such multi‑source trades. Therefore, actions are continuous and computed for each tradable currency pair, without relying on synthetic rates.
-
----
-
-## Installation
-
-All dependencies are listed in `pyproject.toml`.
-
-Install the package locally:
-
-```bash
-git clone <repository-url>
-cd rl_trading
-pip install .
-```
-
 ---
 
 ## Usage
@@ -289,5 +250,3 @@ rl_trading/
 3. Nawathe, S., Panguluri, R., Zhang, J., & Venkatesh, S. (2024). Multimodal deep reinforcement learning for portfolio optimization. arXiv preprint arXiv:2412.17293. https://arxiv.org/abs/2412.17293
 
 4. Lu, L. (2025). Technical Indicator Networks (TINs): An interpretable neural architecture modernizing classical technical analysis for adaptive algorithmic trading. arXiv preprint arXiv:2507.20202. https://arxiv.org/abs/2507.20202
-
----
