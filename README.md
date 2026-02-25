@@ -108,7 +108,7 @@ where:
 
 The reward after each step is the logarithmic return expressed in basis points, minus a quadratic penalty to discourage large trades:
 ```math
-r_t = \ln\left(\frac{V_t}{V_{t-1}}\right) \times 10\,000 \;-\; \text{action\_penalty} \times \sum_i (\text{scaled\_action}_i)^2
+r_t = \ln\left(\frac{V_t}{V_{t-1}}\right) \;-\; \text{action\_penalty} \times \sum_i (\text{scaled\_action}_i)^2
 ```
 where `V_t` is the total portfolio value in the base currency.  
 The quadratic term penalises the sum of squares of the **scaled actions**, promoting smoother position changes. The coefficient `action_penalty` can be tuned (default `0.5`).
