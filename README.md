@@ -34,189 +34,95 @@ cd rl_trading
 pip install .
 ```
 
-We have updated the `README.md` file by removing the detailed PPO hyperparameters table from the **Training with PPO** section and deleting the mention of differential Sharpe ratio from the **Further Steps** list. The rest of the content remains unchanged.
-
-```markdown
-# RL Trading: Reinforcement Learning for FX Trading
-
-This project implements a custom [Gymnasium](https://gymnasium.farama.org/) environment for foreign exchange (FX) trading (high‑, mid‑, low‑frequency). It includes data preprocessing, feature engineering, and a training pipeline using [Ray RLlib](https://docs.ray.io/en/latest/rllib/index.html).
-
-The environment and model were built from scratch, without relying on existing frameworks like [FinRL](https://github.com/AI4Finance-Foundation/FinRL) or [TradeMaster](https://github.com/TradeMaster-NTU/TradeMaster).
-
 ---
 
-## Overview
-
-The goal is to train an agent to trade multiple currency pairs by modelling **flows** for each currency pair at every time step. The environment simulates realistic trading conditions including:
-
-- Transaction fees (1 bps by default)
-- Stochastic slippage
-- Long‑only positions (easily extendable to shorting)
-- Realistic 1‑minute FX bars
-
-The observation space consists of current portfolio weights (for all currencies) and a rich set of technical indicators.
-
-**Why flows instead of direct weight optimisation?**  
-For a portfolio containing multiple currencies, e.g. `{USD, EUR, JPY}`, an agent should be able to purchase JPY using both USD and EUR simultaneously – a capability that direct weight optimisation would miss. Modelling flows per currency pair implicitly allows such multi‑source trades. Therefore, actions are continuous and computed for each tradable currency pair, without relying on synthetic rates.
-
----
-
-## Installation
-
-All dependencies are listed in `pyproject.toml`.
-
-Install the package locally:
-
-```bash
-git clone <repository-url>
-cd rl_trading
-pip install .
-```
-
----
-
-## Usage
-
-### Data Preparation
+## Data Preparation
 
 The project uses 1‑minute FX data from [philipperemy/FX-1-Minute-Data](https://github.com/philipperemy/FX-1-Minute-Data).  
-The notebook `notebooks/create_fx_dataset.ipynb` downloads, extracts, cleans, and computes technical indicators.
+Two Jupyter notebooks handle the complete data pipeline:
 
-Steps:
-1. Download the zip files (EURJPY, EURUSD, etc.) from the provided Google Drive link.
-2. Place them in a folder (e.g., `C:/Users/.../Downloads/`).
-3. Run the notebook to generate `data/FX_data.parquet.gzip`.
+### 1. `create_fx_dataset.ipynb`
+- Downloads the zip archives (EURJPY, EURUSD, etc.) from the provided Google Drive link.
+- Extracts all CSV files and concatenates them into a single DataFrame.
+- Filters data to keep only trading hours (9:00–19:00) and weekdays.
+- Adds a `date` column and sorts by currency and timestamp.
+- Computes a wide set of technical indicators using `pandas_ta` (see [Features](#features)).
+- Saves the result as `data/FX_data.parquet.gzip`.
 
-The final dataset contains OHLCV data plus a wide set of technical indicators (see [Features](#features)) for each currency pair.
+### 2. `prepare_fx_dataset.ipynb`
+- Loads the parquet file and adds return columns (lagged returns and squared returns).
+- Splits the data into three periods:
+  - **Scaler training**: data ≤ 2023‑01‑01 (used to fit `StandardScaler` – avoids look‑ahead bias).
+  - **Training set**: 2023‑01‑02 to 2023‑12‑01.
+  - **Validation set**: from 2023‑12‑01 onwards.
+- Extracts close prices for each currency pair and creates reverse tickers (e.g., if only `EURUSD` exists, `USDEUR` is added as `1 / EURUSD`).
+- Scales all features using `StandardScaler` (fitted on the scaler‑training set).
+- Applies PCA (keeping components that explain >0.5 % variance) to reduce dimensionality.
+- Saves the final preprocessed data (prices + PCA‑reduced features) as `data/preprocessed_data.pkl` (using `dill`).
 
-**Data Splitting & Scaling**  
-The notebook `train_ppo.ipynb` demonstrates a typical data split:
-- First three years → train the `StandardScaler`.
-- Next two years → training set.
-- Last month → validation set.
+After these steps, the data is ready for training.
 
-Features are scaled using `StandardScaler` (or you may substitute `RobustScaler`). The scaler is fitted only on the earliest part of the data to avoid look‑ahead bias.
+---
 
-### Environment
+## Environment
 
 The core environment is `FxTradingEnv` in `rl_trading/environments/fx_environment.py`. It inherits from `BaseTradingEnv`.
 
-#### Action Space
+### Action Space
 - **Type**: `Box` (continuous)
-- **Shape**: `(n_pairs,)` where `n_pairs` is the number of currency pairs (e.g., `"eurusd"`, `"usdjpy"`, …).
-- **Range**: `[-1.0, 1.0]` (interpreted as a fraction of the available source currency, after scaling by `max_delta_in_weights` inside the environment).
+- **Shape**: `(n_pairs,)` where `n_pairs` is the number of currency pairs (e.g., `"EURUSD"`, `"USDJPY"`, …).
+- **Range**: `[-1.0, 1.0]`
 
 #### Interpretation of an Action
-For a given currency pair `XXXYYY` (e.g., `"eurusd"`):
+For a given currency pair `XXXYYY` (e.g., `"EURUSD"`):
 - **Positive action** → buy the **base** currency (`XXX`) using the **quote** currency (`YYY`).  
   `from_currency = YYY`, `to_currency = XXX`.
 - **Negative action** → sell the **base** currency (`XXX`) for the **quote** currency (`YYY`).  
   `from_currency = XXX`, `to_currency = YYY`.
 
-Inside `step()`, the raw action (in `[-1, 1]`) is first multiplied by `max_delta_in_weights` (default `0.25`). This scaled value is then used to determine the trade amount as a fraction of the source currency’s holdings.
+Inside `step()`, the raw action is first multiplied by `max_delta_in_weights` (default `0.25`). This scaled value is then used to determine the trade amount as a fraction of the source currency’s holdings.
 
-#### Reverse Ticker Creation
-The utility `create_reverse_fx_tickers` (in `data_processing.py`) automatically adds missing reverse pairs (e.g., creates `EURUSD` if only `USDEUR` is present) by taking the reciprocal. This ensures that every currency pair is tradable in both directions.
-
-#### Trade Execution
-
+### Trade Execution
 Let:
 - `holdings[from]` = current amount of the source currency.
-- `scaled_action` = raw action (in `[-1, 1]`) multiplied by `max_delta_in_weights`.
+- `scaled_action` = raw action × `max_delta_in_weights`.
 
 The amount to trade is:
-```math
-\text{trade\_amount} = \min\Big(\text{holdings[from]},\; \text{holdings[from]} \times |\text{scaled\_action}|\Big)
+```
+trade_amount = min(holdings[from], holdings[from] * |scaled_action|)
 ```
 This caps the trade at the available balance and interprets `|scaled_action|` as a fraction of the current holdings in the source currency.
 
 The received amount in the destination currency is:
-```math
-\text{received} = \text{trade\_amount} \times \text{rate} \times (1 - \text{fee} - \text{slippage})
+```
+received = trade_amount × rate × (1 - fee - slippage)
 ```
 where:
 - `rate` = market exchange rate for the pair (e.g., `EURUSD`).
-- `fee` = `trade_fee` (e.g., 0.0001 for 1 bps).
-- `slippage` = absolute value of a random draw from a normal distribution:
-  ```math
-  \text{slippage} = \big|\,\mathcal{N}(\mu_{\text{slippage}}, \sigma_{\text{slippage}})\,\big|
-  ```
-  with default `μ = 0.0001`, `σ = 0.0002`. The absolute value ensures slippage always reduces the received amount (negative impact).
+- `fee` = `trade_fee` (default 0.0001 = 1 bps).
+- `slippage` = absolute value of a random draw from a normal distribution:  
+  `slippage = |N(μ_slippage, σ_slippage)|` with default `μ = 0.0001`, `σ = 0.0002`. The absolute value ensures slippage always reduces the received amount.
 
-#### Reward
-
-The reward after each step is the logarithmic return expressed in basis points, minus a quadratic penalty to discourage large trades:
-```math
-r_t = \ln\left(\frac{V_t}{V_{t-1}}\right) \times 10\,000 \;-\; \text{action\_penalty} \times \sum_i (\text{scaled\_action}_i)^2
+### Reward
+The reward after each step is the logarithmic return:
+```
+r_t = ln(V_t / V_{t-1})
 ```
 where `V_t` is the total portfolio value in the base currency.  
-The quadratic term penalises the sum of squares of the **scaled actions**, promoting smoother position changes. The coefficient `action_penalty` can be tuned (default `0.5`).
-
-**Alternative reward: differential Sharpe ratio**  
-If `reward = "diff_sharpe"`, the instantaneous reward is the **differential Sharpe ratio**:
-```math
-D_t = \frac{B_{t-1}(r_t - A_{t-1}) - \tfrac12 A_{t-1}(r_t^2 - B_{t-1})}{(B_{t-1} - A_{t-1}^2)^{3/2} + \epsilon}
+A quadratic penalty discourages large trades:
 ```
-with exponential moving averages `A` (mean) and `B` (second moment) updated as:
-```math
-A_t = A_{t-1} + \eta (r_t - A_{t-1}), \quad B_t = B_{t-1} + \eta (r_t^2 - B_{t-1})
+reward = r_t - action_penalty × sum_i (scaled_action_i)^2
 ```
-where `η = 0.1` (default). This formulation directly optimises the Sharpe ratio over time.
+The coefficient `action_penalty` can be tuned (default `0.5`).  
+If `reward = "diff_sharpe"`, the instantaneous reward is the **differential Sharpe ratio** (see the code for the exact formula).
 
-#### Usage Example
-```python
-import pandas as pd
-from rl_trading.environments.fx_environment import FxTradingEnv
+### Observation Space
+The observation is a concatenation of:
+- **Current portfolio weights** for all currencies (in the base currency).
+- **Technical indicators** (from the PCA‑reduced features).
+- **Time features** (minute, hour, day of week, etc., cyclic encoded).
 
-# Load preprocessed data (after scaling)
-historical_prices = pd.read_parquet("data/historical_prices.parquet")
-features = pd.read_parquet("data/features.parquet")
-
-initial_portfolio = {"USD": 100_000}
-trading_params = {
-    "trade_fee": 0.0001,
-    "slippage": (0.0001, 0.0002),
-    "base_currency": "USD",
-    "max_delta_in_weights": 0.25,
-    "action_penalty": 0.5,
-    "reward": "total_profit",          # or "diff_sharpe"
-    "sharpe_eta": 0.1,                 # used only with diff_sharpe
-}
-
-env = FxTradingEnv(
-    historical_prices=historical_prices,
-    features_dataset=features,
-    initial_portfolio=initial_portfolio,
-    trading_params=trading_params,
-    ticker_set=("EURUSD", "USDJPY", ...),
-    start_datetime=pd.Timestamp("2023-01-03 09:00:00"),
-    episode_length_days=1,
-)
-env.preprocess_data()
-
-obs, info = env.reset()
-action = env.action_space.sample()   # random action in [-1, 1]
-obs, reward, terminated, truncated, info = env.step(action)
-```
-
-### Training with PPO
-
-The notebook `notebooks/train_ppo.ipynb` demonstrates a complete training pipeline using Ray RLlib and a custom PyTorch model (`FXModel`).
-
-#### Custom Model Architecture (`fx_model.py`)
-
-The model consists of three parts:
-
-- **Main network** – three hidden layers (256 → 128 → 64) with LayerNorm, GELU activation, and dropout (0.2).
-- **Mean network** – linear layer projecting the 64‑dim features to the action dimension, followed by `Tanh` to bound actions in `[-1, 1]`.
-- **Log‑std network** – linear layer producing the log‑standard deviations for the action distribution.
-- **Value network** – two layers (64 → 32 → 1) with GELU activation.
-
-The forward pass returns a concatenated tensor of means and log‑stds, as required by RLlib’s `StochasticSampling` exploration.
-
-Data objects (`historical_prices`, `features`) are passed to Ray workers via `ray.put` to avoid serialisation overhead.
-
-After training, the PyTorch state dict is saved (e.g., `USDEUR_MODEL_WEIGHTS_1_MIN_1_DAY.pth`) for later evaluation.
+The exact shape depends on the number of currencies and the number of PCA components kept.
 
 ---
 
@@ -244,6 +150,44 @@ All features are scaled using `StandardScaler` (trained on pre‑2023 data) befo
 
 ---
 
+## Training with PPO
+
+The notebook `notebooks/train_ppo.ipynb` demonstrates a complete training pipeline using Ray RLlib and a custom PyTorch model (`FXModel`).
+
+### Custom Model Architecture (`fx_model.py`)
+
+The model consists of three parts:
+- **Main network** – three hidden layers (256 → 128 → 64) with LayerNorm, GELU activation, and dropout (0.2).
+- **Mean network** – linear layer projecting the 64‑dim features to the action dimension, followed by `Tanh` to bound actions in `[-1, 1]`.
+- **Log‑std network** – linear layer producing the log‑standard deviations for the action distribution (required by RLlib’s `StochasticSampling`).
+- **Value network** – two layers (64 → 32 → 1) with GELU activation.
+
+The forward pass returns a concatenated tensor of means and log‑stds, as required by RLlib.
+
+### RLlib Configuration
+- **Environment**: custom `FxTradingEnv` registered as `"fx_trading_env"`.
+- **Framework**: PyTorch.
+- **PPO hyperparameters**:
+  - Learning rate: `3e-4`
+  - Clip parameter: `0.2`
+  - Gradient clipping: `0.5`
+  - Value function clipping: `10.0`
+  - Entropy coefficient: `0.01`
+  - Discount factor (gamma): `0.99`
+  - GAE lambda: `0.95`
+  - Number of SGD epochs per batch: `8`
+  - Train batch size: `16384 × episode_length_days`
+- **Rollout workers**: uses all available CPUs minus one, with 4 environments per worker.
+- **Exploration**: `StochasticSampling` with `random_timesteps=5000`.
+- **Data passing**: Large data objects (`historical_prices`, `features`) are passed via `ray.put` to avoid serialisation overhead.
+
+### Early Stopping
+Training stops if the average reward over the last 5 epochs does not improve by at least `0.01` for 20 consecutive epochs (after the first 100 epochs).
+
+After training, the PyTorch state dict is saved (e.g., `ALL_CCY_MODEL_WEIGHTS_1_MIN_1_DAY.pth`) for later evaluation.
+
+---
+
 ## Project Structure
 
 ```
@@ -260,6 +204,7 @@ rl_trading/
 │   └── __init__.py
 ├── notebooks/
 │   ├── create_fx_dataset.ipynb      # Data download and feature engineering
+│   ├── prepare_fx_dataset.ipynb     # Scaling, splitting, PCA, saving
 │   └── train_ppo.ipynb              # Training pipeline with RLlib
 ├── tests/
 │   ├── conftest.py                   # Pytest fixtures
@@ -273,7 +218,7 @@ rl_trading/
 ## Further Steps
 
 1. Train the model for more currencies and longer episodes.
-2. Apply PCA on features set for dimensionality reduction
+2. Apply PCA on features set for dimensionality reduction.
 3. Experiment with other RL algorithms: SAC, DreamerV3.
 4. Test the trained model on validation data and on synthetic data generated by a [TimeDiff model](https://github.com/IvanKolesn/market_scenarios_generator).
 5. (*Optional*) Try Contextual Bandits using [Pearl](https://github.com/facebookresearch/Pearl).
@@ -289,5 +234,3 @@ rl_trading/
 3. Nawathe, S., Panguluri, R., Zhang, J., & Venkatesh, S. (2024). Multimodal deep reinforcement learning for portfolio optimization. arXiv preprint arXiv:2412.17293. https://arxiv.org/abs/2412.17293
 
 4. Lu, L. (2025). Technical Indicator Networks (TINs): An interpretable neural architecture modernizing classical technical analysis for adaptive algorithmic trading. arXiv preprint arXiv:2507.20202. https://arxiv.org/abs/2507.20202
-
----
