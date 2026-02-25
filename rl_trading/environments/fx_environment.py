@@ -127,7 +127,6 @@ class FxTradingEnv(BaseTradingEnv):
         4. Compute rewards: differential Sharpe ratio + action penalty
         """
         target_portfolio = self.current_portfolio
-        old_portfolio = target_portfolio.copy()
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
@@ -163,8 +162,8 @@ class FxTradingEnv(BaseTradingEnv):
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
 
             trade_amount = min(
-                old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action) * max_delta,
+                target_portfolio[fx_from],
+                target_portfolio[fx_from] * abs(single_action) * max_delta,
             )
 
             target_portfolio[fx_from] -= trade_amount
