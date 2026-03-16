@@ -59,7 +59,7 @@ class FxTradingEnv(BaseTradingEnv):
         self.initial_portfolio_value = self.current_portfolio_value
 
         self.observation_space = gym.spaces.Box(
-            low=-1e5, high=1e5, shape=self._get_state_dim(), dtype=np.float32
+            low=-1e6, high=1e6, shape=self._get_state_dim(), dtype=np.float32
         )
 
     def _validate_inputs(self) -> None:
@@ -127,7 +127,6 @@ class FxTradingEnv(BaseTradingEnv):
         4. Compute rewards: differential Sharpe ratio + action penalty
         """
         target_portfolio = self.current_portfolio
-        old_portfolio = target_portfolio.copy()
         old_portfolio_value = self.current_portfolio_value
 
         if old_portfolio_value <= 1e-2:
@@ -163,8 +162,8 @@ class FxTradingEnv(BaseTradingEnv):
                 fx_from, fx_to = currency_pair[-3:], currency_pair[:3]
 
             trade_amount = min(
-                old_portfolio[fx_from],
-                old_portfolio[fx_from] * abs(single_action) * max_delta,
+                target_portfolio[fx_from],
+                target_portfolio[fx_from] * abs(single_action) * max_delta,
             )
 
             target_portfolio[fx_from] -= trade_amount
@@ -179,7 +178,7 @@ class FxTradingEnv(BaseTradingEnv):
         if new_portfolio_value <= 1e-2:
             return self._get_state(), 0.0, True, False, {}
 
-        reward = np.log(self.current_portfolio_value / old_portfolio_value)
+        reward = np.log(new_portfolio_value / old_portfolio_value)
 
         if self.trading_params["reward"] == "diff_sharpe":
             reward = self._compute_differential_sharpe(reward)
